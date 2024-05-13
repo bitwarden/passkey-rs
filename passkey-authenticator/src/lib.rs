@@ -43,7 +43,7 @@ use passkey_types::{ctap2::Ctap2Error, Bytes};
 
 pub use self::{
     authenticator::Authenticator,
-    credential_store::{CredentialStore, MemoryStore},
+    credential_store::{CredentialStore, DiscoverabilitySupport, MemoryStore},
     ctap2::Ctap2Api,
     u2f::U2fApi,
     user_validation::{UserCheck, UserValidationMethod},
@@ -58,7 +58,7 @@ fn private_key_from_cose_key(key: &CoseKey) -> Result<SecretKey, Ctap2Error> {
     if !matches!(
         key.alg,
         Some(coset::RegisteredLabelWithPrivate::Assigned(
-            iana::Algorithm::ES256
+            Algorithm::ES256
         ))
     ) {
         return Err(Ctap2Error::UnsupportedAlgorithm);
@@ -94,7 +94,7 @@ pub fn public_key_der_from_cose_key(key: &CoseKey) -> Result<Bytes, Ctap2Error> 
     if !matches!(
         key.alg,
         Some(coset::RegisteredLabelWithPrivate::Assigned(
-            iana::Algorithm::ES256
+            Algorithm::ES256
         ))
     ) {
         return Err(Ctap2Error::UnsupportedAlgorithm);
