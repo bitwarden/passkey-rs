@@ -87,11 +87,11 @@
 //! #         Ok(UserCheck { presence: true, verification: true })
 //! #     }
 //! #
-//! #     fn is_verification_enabled(&self) -> Option<bool> {
+//! #     async fn is_verification_enabled(&self) -> Option<bool> {
 //! #         Some(true)
 //! #     }
 //! #
-//! #     fn is_presence_enabled(&self) -> bool {
+//! #     async fn is_presence_enabled(&self) -> bool {
 //! #         true
 //! #     }
 //! # }
@@ -198,11 +198,11 @@
 //! #         Ok(UserCheck { presence: true, verification: true })
 //! #     }
 //! #
-//! #     fn is_verification_enabled(&self) -> Option<bool> {
+//! #     async fn is_verification_enabled(&self) -> Option<bool> {
 //! #         Some(true)
 //! #     }
 //! #
-//! #     fn is_presence_enabled(&self) -> bool {
+//! #     async fn is_presence_enabled(&self) -> bool {
 //! #         true
 //! #     }
 //! # }
