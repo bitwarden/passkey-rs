@@ -3,6 +3,22 @@ use passkey_types::{ctap2::Ctap2Error, Passkey};
 #[cfg(doc)]
 use crate::Authenticator;
 
+/// Additional information that can be displayed to the user if the authenticator has a display.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UIHint<P> {
+    /// Inform the user that the operation cannot be completed because the user already has a credential registered.
+    InformExcludedCredentialFound(P),
+
+    /// Inform the user that the operation cannot be completed because the user has no matching credentials registered.
+    InformNoCredentialsFound,
+
+    /// Request permission to save the credential in this object.
+    RequestNewCredential(Passkey),
+
+    /// Request permission to use the existing credential in this object.
+    RequestExistingCredential(P),
+}
+
 /// The result of a user validation check.
 #[derive(Clone, Copy, PartialEq)]
 pub struct UserCheck {
@@ -24,12 +40,12 @@ pub trait UserValidationMethod {
     /// Check for the user's presence and obtain consent for the operation. The operation may
     /// also require the user to be verified.
     ///
-    /// * `crdential` - Can be used to display additional information about the operation to the user.
+    /// * `credential` - Can be used to display additional information about the operation to the user.
     /// * `presence` - Indicates whether the user's presence is required.
     /// * `verification` - Indicates whether the user should be verified.
     async fn check_user(
         &self,
-        credential: Option<Self::PasskeyItem>,
+        hint: UIHint<Self::PasskeyItem>,
         presence: bool,
         verification: bool,
     ) -> Result<UserCheck, Ctap2Error>;
@@ -95,7 +111,7 @@ impl MockUserValidationMethod {
         user_mock
             .expect_check_user()
             .with(
-                mockall::predicate::eq(Some(credential)),
+                mockall::predicate::eq(UIHint::RequestExistingCredential(credential)),
                 mockall::predicate::eq(true),
                 mockall::predicate::eq(true),
             )
