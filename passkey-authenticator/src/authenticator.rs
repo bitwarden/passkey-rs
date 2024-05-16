@@ -4,7 +4,7 @@ use passkey_types::{
     webauthn,
 };
 
-use crate::{CredentialStore, UserValidationMethod};
+use crate::{user_validation, CredentialStore, UserValidationMethod};
 
 mod get_assertion;
 mod get_info;
@@ -133,8 +133,8 @@ where
     ///            CTAP2_ERR_OPERATION_DENIED error.
     async fn check_user(
         &self,
+        hint: user_validation::UIHint<'_, <U as UserValidationMethod>::PasskeyItem>,
         options: &passkey_types::ctap2::make_credential::Options,
-        credential: Option<<U as UserValidationMethod>::PasskeyItem>,
     ) -> Result<Flags, Ctap2Error> {
         if options.uv && self.user_validation.is_verification_enabled().await != Some(true) {
             return Err(Ctap2Error::UnsupportedOption);
@@ -142,7 +142,7 @@ where
 
         let check_result = self
             .user_validation
-            .check_user(credential, options.up, options.uv)
+            .check_user(hint, options.up, options.uv)
             .await?;
 
         if options.up && !check_result.presence {
@@ -170,7 +170,7 @@ where
 mod tests {
     use passkey_types::ctap2::{Aaguid, Flags};
 
-    use crate::{Authenticator, MockUserValidationMethod, UserCheck};
+    use crate::{user_validation::UIHint, Authenticator, MockUserValidationMethod, UserCheck};
 
     #[tokio::test]
     async fn check_user_does_not_check_up_or_uv_when_not_requested() {
@@ -201,7 +201,10 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await.unwrap();
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await
+            .unwrap();
 
         // Assert
         assert_eq!(result, Flags::empty());
@@ -236,7 +239,10 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await.unwrap();
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await
+            .unwrap();
 
         // Assert
         assert_eq!(result, Flags::UP);
@@ -274,7 +280,10 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await.unwrap();
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await
+            .unwrap();
 
         // Assert
         assert_eq!(result, Flags::UP | Flags::UV);
@@ -309,7 +318,9 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await;
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await;
 
         // Assert
         assert_eq!(
@@ -350,7 +361,9 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await;
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await;
 
         // Assert
         assert_eq!(
@@ -377,7 +390,9 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await;
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await;
 
         // Assert
         assert_eq!(
@@ -419,7 +434,10 @@ mod tests {
         };
 
         // Act
-        let result = authenticator.check_user(&options, None).await.unwrap();
+        let result = authenticator
+            .check_user(UIHint::InformNoCredentialsFound, &options)
+            .await
+            .unwrap();
 
         // Assert
         assert_eq!(result, Flags::UP | Flags::UV);

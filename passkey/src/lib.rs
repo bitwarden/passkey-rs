@@ -64,7 +64,7 @@
 //! In this example, we are going to manually create a `CredentialCreationOptions` struct with hypothetical values named `*_from_rp` to indicate that these are values that would usually be supplied by the Relying Party. For simplicity, most of the `CredentialCreationOptions` are being set to `None` here.
 //! ```
 //! use passkey::{
-//!     authenticator::{Authenticator, UserValidationMethod, UserCheck},
+//!     authenticator::{Authenticator, UIHint, UserValidationMethod, UserCheck},
 //!     client::{Client, DefaultClientData, WebauthnError},
 //!     types::{ctap2::*, rand::random_vec, crypto::sha256, webauthn::*, Bytes, Passkey},
 //! };
@@ -78,9 +78,9 @@
 //! # impl UserValidationMethod for MyUserValidationMethod {
 //! #     type PasskeyItem = Passkey;
 //! #
-//! #     async fn check_user(
+//! #     async fn check_user<'a>(
 //! #         &self,
-//! #         _credential: Option<Self::PasskeyItem>,
+//! #         _hint: UIHint<'a, Self::PasskeyItem>,
 //! #         presence: bool,
 //! #         verification: bool,
 //! #     ) -> Result<UserCheck, Ctap2Error> {
@@ -175,7 +175,7 @@
 //!
 //! ```
 //! # use passkey::{
-//! #     authenticator::{Authenticator, UserValidationMethod, UserCheck},
+//! #     authenticator::{Authenticator, UIHint, UserValidationMethod, UserCheck},
 //! #     client::{Client, WebauthnError},
 //! #     types::{ctap2::*, rand::random_vec, crypto::sha256, webauthn::*, Bytes, Passkey},
 //! # };
@@ -189,9 +189,9 @@
 //! # impl UserValidationMethod for MyUserValidationMethod {
 //! #     type PasskeyItem = Passkey;
 //! #
-//! #     async fn check_user(
+//! #     async fn check_user<'a>(
 //! #         &self,
-//! #         _credential: Option<Self::PasskeyItem>,
+//! #         _hint: UIHint<'a, Self::PasskeyItem>,
 //! #         presence: bool,
 //! #         verification: bool,
 //! #     ) -> Result<UserCheck, Ctap2Error> {

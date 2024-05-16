@@ -7,18 +7,19 @@ use passkey_types::{
     Passkey,
 };
 
-use crate::{Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod};
+use crate::{
+    user_validation::UIHint, Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod,
+};
 
 impl<S, U> Authenticator<S, U>
 where
     S: CredentialStore + Sync,
-    U: UserValidationMethod + Sync,
+    U: UserValidationMethod<PasskeyItem = <S as CredentialStore>::PasskeyItem> + Sync,
+    Passkey: TryFrom<<S as CredentialStore>::PasskeyItem> + Clone,
 {
     /// This method is invoked by the host to request generation of a new credential in the authenticator.
     pub async fn make_credential(&mut self, input: Request) -> Result<Response, StatusCode> {
-        let flags = if input.options.up {
-            self.check_user(&input.options, None).await?
-        } else {
+        if !input.options.up {
             return Err(Ctap2Error::InvalidOption.into());
         };
 
@@ -27,22 +28,32 @@ where
         //    terminate this procedure and return error code CTAP2_ERR_CREDENTIAL_EXCLUDED. User
         //    presence check is required for CTAP2 authenticators before the RP gets told that the
         //    token is already registered to behave similarly to CTAP1/U2F authenticators.
-
         if input
             .exclude_list
             .as_ref()
             .filter(|list| !list.is_empty())
             .is_some()
         {
-            if let Ok(false) = self
+            if let Some(excluded_credential) = self
                 .store()
                 .find_credentials(input.exclude_list.as_deref(), &input.rp.id)
-                .await
-                .map(|creds| creds.is_empty())
+                .await?
+                .first()
             {
+                self.check_user(
+                    UIHint::InformExcludedCredentialFound(excluded_credential),
+                    &input.options,
+                )
+                .await?;
+
                 return Err(Ctap2Error::CredentialExcluded.into());
             }
         }
+
+        // TODO: Move further down and use the proper hint
+        let flags = self
+            .check_user(UIHint::InformNoCredentialsFound, &input.options)
+            .await?;
 
         // 2. If the pubKeyCredParams parameter does not contain a valid COSEAlgorithmIdentifier
         //    value that is supported by the authenticator, terminate this procedure and return
