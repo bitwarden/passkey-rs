@@ -242,16 +242,17 @@ mod tests {
     async fn get_assertion_increments_signature_counter_when_counter_is_some() {
         // Arrange
         let request = good_request();
-        let store = Some(Passkey {
+        let passkey = Passkey {
             counter: Some(9000),
             ..create_passkey()
-        });
+        };
+        let store = Some(passkey.clone());
         let mut authenticator = Authenticator::new(
             Aaguid::new_empty(),
-            store.clone(),
+            store,
             MockUserValidationMethod::verified_user_with_hint(
                 1,
-                MockUIHint::RequestExistingCredential(store.unwrap()),
+                MockUIHint::RequestExistingCredential(passkey),
             ),
         );
 
