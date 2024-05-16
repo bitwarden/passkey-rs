@@ -72,6 +72,16 @@ pub trait UserValidationMethod {
     async fn is_verification_enabled(&self) -> Option<bool>;
 }
 
+/// A version of the [`UIHint`] that uses a [`Passkey`] as the passkey item, is not tied to any specific lifetime,
+/// and does not verify new passkey items which contain new random data that the tests cannot know about beforehand.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MockUIHint {
+    InformExcludedCredentialFound(Passkey),
+    InformNoCredentialsFound,
+    RequestNewCredential,
+    RequestExistingCredential(Passkey),
+}
+
 #[cfg(any(test, feature = "testable"))]
 impl MockUserValidationMethod {
     /// Sets up the mock for returning true for the verification.
@@ -103,17 +113,36 @@ impl MockUserValidationMethod {
     }
 
     /// Sets up the mock for returning true for the verification.
-    pub fn verified_user_with_credential(times: usize, credential: Passkey) -> Self {
+    pub fn verified_user_with_hint(times: usize, expected_hint: MockUIHint) -> Self {
         let mut user_mock = MockUserValidationMethod::new();
         user_mock
             .expect_is_verification_enabled()
-            .returning(|| Some(true));
+            .returning(|| Some(true))
+            .times(..);
+        user_mock
+            .expect_is_presence_enabled()
+            .returning(|| true)
+            .times(..);
         user_mock
             .expect_check_user()
-            .withf(move |hint, presence, verification| {
-                hint == &UIHint::RequestExistingCredential(&credential)
-                    && *presence
+            .withf(move |actual_hint, presence, verification| {
+                println!("Actual: {:?}, Expected: {:?}", actual_hint, expected_hint);
+                *presence
                     && *verification
+                    && match &expected_hint {
+                        MockUIHint::InformExcludedCredentialFound(p) => {
+                            actual_hint == &UIHint::InformExcludedCredentialFound(p)
+                        }
+                        MockUIHint::InformNoCredentialsFound => {
+                            matches!(actual_hint, UIHint::InformNoCredentialsFound)
+                        }
+                        MockUIHint::RequestNewCredential => {
+                            matches!(actual_hint, UIHint::RequestNewCredential(_))
+                        }
+                        MockUIHint::RequestExistingCredential(p) => {
+                            actual_hint == &UIHint::RequestExistingCredential(p)
+                        }
+                    }
             })
             .returning(|_, _, _| {
                 Ok(UserCheck {

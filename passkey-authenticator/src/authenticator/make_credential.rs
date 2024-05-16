@@ -50,11 +50,6 @@ where
             }
         }
 
-        // TODO: Move further down and use the proper hint
-        let flags = self
-            .check_user(UIHint::InformNoCredentialsFound, &input.options)
-            .await?;
-
         // 2. If the pubKeyCredParams parameter does not contain a valid COSEAlgorithmIdentifier
         //    value that is supported by the authenticator, terminate this procedure and return
         //    error code CTAP2_ERR_UNSUPPORTED_ALGORITHM.
@@ -95,11 +90,7 @@ where
             return Err(Ctap2Error::UnsupportedOption.into());
         }
 
-        // 8. If the authenticator has a display, show the items contained within the user and rp
-        //    parameter structures to the user. Alternatively, request user interaction in an
-        //    authenticator-specific way (e.g., flash the LED light). Request permission to create
-        //    a credential. If the user declines permission, return the CTAP2_ERR_OPERATION_DENIED
-        //    error.
+        // 8. Moving step 8 to after step 9 so that the new credential can be displayed to the user
 
         // 9. Generate a new credential key pair for the algorithm specified.
         let credential_id: Vec<u8> = {
@@ -129,6 +120,15 @@ where
                 false => None,
             },
         };
+
+        // 8. If the authenticator has a display, show the items contained within the user and rp
+        //    parameter structures to the user. Alternatively, request user interaction in an
+        //    authenticator-specific way (e.g., flash the LED light). Request permission to create
+        //    a credential. If the user declines permission, return the CTAP2_ERR_OPERATION_DENIED
+        //    error.
+        let flags = self
+            .check_user(UIHint::RequestNewCredential(&passkey), &input.options)
+            .await?;
 
         // 10. If "rk" in options parameter is set to true:
         //     1. If a credential for the same RP ID and account ID already exists on the
@@ -189,7 +189,7 @@ mod tests {
     use super::*;
     use crate::{
         credential_store::{DiscoverabilitySupport, StoreInfo},
-        user_validation::MockUserValidationMethod,
+        user_validation::{MockUIHint, MockUserValidationMethod},
         MemoryStore,
     };
 
@@ -224,7 +224,8 @@ mod tests {
     #[tokio::test]
     async fn assert_storage_on_success() {
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock =
+            MockUserValidationMethod::verified_user_with_hint(1, MockUIHint::RequestNewCredential);
 
         let mut authenticator =
             Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
@@ -261,7 +262,10 @@ mod tests {
             counter: None,
         };
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user_with_hint(
+            1,
+            MockUIHint::InformExcludedCredentialFound(passkey.clone()),
+        );
 
         shared_store.lock().await.insert(cred_id.into(), passkey);
 
@@ -279,7 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn assert_unsupported_algorithm() {
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user(0);
         let mut authenticator =
             Authenticator::new(Aaguid::new_empty(), MemoryStore::new(), user_mock);
 
@@ -358,7 +362,7 @@ mod tests {
 
         // Arrange
         let store = StoreWithoutDiscoverableSupport;
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user(0);
         let request = good_request();
         let mut authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
         authenticator.set_make_credentials_with_signature_counter(true);

@@ -170,12 +170,12 @@ mod tests {
     use passkey_types::{
         ctap2::{
             get_assertion::{Options, Request},
-            Aaguid,
+            Aaguid, Ctap2Error,
         },
         Passkey,
     };
 
-    use crate::{Authenticator, MockUserValidationMethod};
+    use crate::{user_validation::MockUIHint, Authenticator, MockUserValidationMethod};
 
     fn create_passkey() -> Passkey {
         Passkey {
@@ -218,6 +218,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_assertion_returns_no_credentials_found() {
+        // Arrange
+        let request = good_request();
+        let store = None;
+        let mut authenticator = Authenticator::new(
+            Aaguid::new_empty(),
+            store,
+            MockUserValidationMethod::verified_user_with_hint(
+                1,
+                MockUIHint::InformNoCredentialsFound,
+            ),
+        );
+
+        // Act
+        let response = authenticator.get_assertion(request).await;
+
+        // Assert
+        assert_eq!(response.unwrap_err(), Ctap2Error::NoCredentials.into(),);
+    }
+
+    #[tokio::test]
     async fn get_assertion_increments_signature_counter_when_counter_is_some() {
         // Arrange
         let request = good_request();
@@ -227,8 +248,11 @@ mod tests {
         });
         let mut authenticator = Authenticator::new(
             Aaguid::new_empty(),
-            store,
-            MockUserValidationMethod::verified_user(1),
+            store.clone(),
+            MockUserValidationMethod::verified_user_with_hint(
+                1,
+                MockUIHint::RequestExistingCredential(store.unwrap()),
+            ),
         );
 
         // Act
