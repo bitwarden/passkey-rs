@@ -5,18 +5,18 @@ use crate::Authenticator;
 
 /// Additional information that can be displayed to the user if the authenticator has a display.
 #[derive(Debug, Clone, PartialEq)]
-pub enum UIHint<P> {
+pub enum UIHint<'a, P> {
     /// Inform the user that the operation cannot be completed because the user already has a credential registered.
-    InformExcludedCredentialFound(P),
+    InformExcludedCredentialFound(&'a P),
 
     /// Inform the user that the operation cannot be completed because the user has no matching credentials registered.
     InformNoCredentialsFound,
 
     /// Request permission to save the credential in this object.
-    RequestNewCredential(Passkey),
+    RequestNewCredential(&'a Passkey),
 
     /// Request permission to use the existing credential in this object.
-    RequestExistingCredential(P),
+    RequestExistingCredential(&'a P),
 }
 
 /// The result of a user validation check.
@@ -43,9 +43,9 @@ pub trait UserValidationMethod {
     /// * `credential` - Can be used to display additional information about the operation to the user.
     /// * `presence` - Indicates whether the user's presence is required.
     /// * `verification` - Indicates whether the user should be verified.
-    async fn check_user(
+    async fn check_user<'a>(
         &self,
-        hint: UIHint<Self::PasskeyItem>,
+        hint: UIHint<'a, Self::PasskeyItem>,
         presence: bool,
         verification: bool,
     ) -> Result<UserCheck, Ctap2Error>;
@@ -110,11 +110,11 @@ impl MockUserValidationMethod {
             .returning(|| Some(true));
         user_mock
             .expect_check_user()
-            .with(
-                mockall::predicate::eq(UIHint::RequestExistingCredential(credential)),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(true),
-            )
+            .withf(move |hint, presence, verification| {
+                hint == &UIHint::RequestExistingCredential(&credential)
+                    && *presence
+                    && *verification
+            })
             .returning(|_, _, _| {
                 Ok(UserCheck {
                     presence: true,
