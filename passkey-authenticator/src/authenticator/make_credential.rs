@@ -127,7 +127,10 @@ where
         //    a credential. If the user declines permission, return the CTAP2_ERR_OPERATION_DENIED
         //    error.
         let flags = self
-            .check_user(UIHint::RequestNewCredential(&passkey), &input.options)
+            .check_user(
+                UIHint::RequestNewCredential(&input.user.clone().into(), &input.rp, &input.options),
+                &input.options,
+            )
             .await?;
 
         // 10. If "rk" in options parameter is set to true:
@@ -223,14 +226,19 @@ mod tests {
 
     #[tokio::test]
     async fn assert_storage_on_success() {
+        let request = good_request();
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock =
-            MockUserValidationMethod::verified_user_with_hint(1, MockUIHint::RequestNewCredential);
+        let user_mock = MockUserValidationMethod::verified_user_with_hint(
+            1,
+            MockUIHint::RequestNewCredential(
+                request.user.clone().into(),
+                request.rp.clone(),
+                request.options.clone(),
+            ),
+        );
 
         let mut authenticator =
             Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
-
-        let request = good_request();
 
         authenticator
             .make_credential(request)

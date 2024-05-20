@@ -1,4 +1,11 @@
-use passkey_types::{ctap2::Ctap2Error, Passkey};
+use passkey_types::{
+    ctap2::{
+        get_assertion::Options,
+        make_credential::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity},
+        Ctap2Error,
+    },
+    Passkey,
+};
 
 #[cfg(doc)]
 use crate::Authenticator;
@@ -13,7 +20,11 @@ pub enum UIHint<'a, P> {
     InformNoCredentialsFound,
 
     /// Request permission to save the credential in this object.
-    RequestNewCredential(&'a Passkey),
+    RequestNewCredential(
+        &'a PublicKeyCredentialUserEntity,
+        &'a PublicKeyCredentialRpEntity,
+        &'a Options,
+    ),
 
     /// Request permission to use the existing credential in this object.
     RequestExistingCredential(&'a P),
@@ -78,7 +89,11 @@ pub trait UserValidationMethod {
 pub enum MockUIHint {
     InformExcludedCredentialFound(Passkey),
     InformNoCredentialsFound,
-    RequestNewCredential,
+    RequestNewCredential(
+        PublicKeyCredentialUserEntity,
+        PublicKeyCredentialRpEntity,
+        Options,
+    ),
     RequestExistingCredential(Passkey),
 }
 
@@ -126,7 +141,6 @@ impl MockUserValidationMethod {
         user_mock
             .expect_check_user()
             .withf(move |actual_hint, presence, verification| {
-                println!("Actual: {:?}, Expected: {:?}", actual_hint, expected_hint);
                 *presence
                     && *verification
                     && match &expected_hint {
@@ -136,8 +150,8 @@ impl MockUserValidationMethod {
                         MockUIHint::InformNoCredentialsFound => {
                             matches!(actual_hint, UIHint::InformNoCredentialsFound)
                         }
-                        MockUIHint::RequestNewCredential => {
-                            matches!(actual_hint, UIHint::RequestNewCredential(_))
+                        MockUIHint::RequestNewCredential(user, rp, options) => {
+                            actual_hint == &UIHint::RequestNewCredential(user, rp, options)
                         }
                         MockUIHint::RequestExistingCredential(p) => {
                             actual_hint == &UIHint::RequestExistingCredential(p)
