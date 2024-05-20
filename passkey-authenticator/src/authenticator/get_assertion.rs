@@ -8,7 +8,10 @@ use passkey_types::{
     Passkey,
 };
 
-use crate::{private_key_from_cose_key, Authenticator, CredentialStore, UserValidationMethod};
+use crate::{
+    private_key_from_cose_key, user_validation::UIHint, Authenticator, CredentialStore,
+    UserValidationMethod,
+};
 
 impl<S: CredentialStore + Sync, U> Authenticator<S, U>
 where
@@ -76,9 +79,11 @@ where
         // 7. Collect user consent if required. This step MUST happen before the following steps due
         //    to privacy reasons (i.e., authenticator cannot disclose existence of a credential
         //    until the user interacted with the device):
-        let flags = self
-            .check_user(&input.options, maybe_credential.as_ref().ok().cloned())
-            .await?;
+        let hint = match &maybe_credential {
+            Ok(credential) => UIHint::RequestExistingCredential(credential),
+            Err(_) => UIHint::InformNoCredentialsFound,
+        };
+        let flags = self.check_user(hint, &input.options).await?;
 
         // 8. If no credentials were located in step 1, return CTAP2_ERR_NO_CREDENTIALS.
         let mut credential = maybe_credential?
@@ -165,12 +170,12 @@ mod tests {
     use passkey_types::{
         ctap2::{
             get_assertion::{Options, Request},
-            Aaguid,
+            Aaguid, Ctap2Error,
         },
         Passkey,
     };
 
-    use crate::{Authenticator, MockUserValidationMethod};
+    use crate::{user_validation::MockUIHint, Authenticator, MockUserValidationMethod};
 
     fn create_passkey() -> Passkey {
         Passkey {
@@ -213,17 +218,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_assertion_increments_signature_counter_when_counter_is_some() {
+    async fn get_assertion_returns_no_credentials_found() {
         // Arrange
         let request = good_request();
-        let store = Some(Passkey {
-            counter: Some(9000),
-            ..create_passkey()
-        });
+        let store = None;
         let mut authenticator = Authenticator::new(
             Aaguid::new_empty(),
             store,
-            MockUserValidationMethod::verified_user(1),
+            MockUserValidationMethod::verified_user_with_hint(
+                1,
+                MockUIHint::InformNoCredentialsFound,
+            ),
+        );
+
+        // Act
+        let response = authenticator.get_assertion(request).await;
+
+        // Assert
+        assert_eq!(response.unwrap_err(), Ctap2Error::NoCredentials.into(),);
+    }
+
+    #[tokio::test]
+    async fn get_assertion_increments_signature_counter_when_counter_is_some() {
+        // Arrange
+        let request = good_request();
+        let passkey = Passkey {
+            counter: Some(9000),
+            ..create_passkey()
+        };
+        let store = Some(passkey.clone());
+        let mut authenticator = Authenticator::new(
+            Aaguid::new_empty(),
+            store,
+            MockUserValidationMethod::verified_user_with_hint(
+                1,
+                MockUIHint::RequestExistingCredential(passkey),
+            ),
         );
 
         // Act

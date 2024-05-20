@@ -7,18 +7,19 @@ use passkey_types::{
     Passkey,
 };
 
-use crate::{Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod};
+use crate::{
+    user_validation::UIHint, Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod,
+};
 
 impl<S, U> Authenticator<S, U>
 where
     S: CredentialStore + Sync,
-    U: UserValidationMethod + Sync,
+    U: UserValidationMethod<PasskeyItem = <S as CredentialStore>::PasskeyItem> + Sync,
+    Passkey: TryFrom<<S as CredentialStore>::PasskeyItem> + Clone,
 {
     /// This method is invoked by the host to request generation of a new credential in the authenticator.
     pub async fn make_credential(&mut self, input: Request) -> Result<Response, StatusCode> {
-        let flags = if input.options.up {
-            self.check_user(&input.options, None).await?
-        } else {
+        if !input.options.up {
             return Err(Ctap2Error::InvalidOption.into());
         };
 
@@ -27,19 +28,24 @@ where
         //    terminate this procedure and return error code CTAP2_ERR_CREDENTIAL_EXCLUDED. User
         //    presence check is required for CTAP2 authenticators before the RP gets told that the
         //    token is already registered to behave similarly to CTAP1/U2F authenticators.
-
         if input
             .exclude_list
             .as_ref()
             .filter(|list| !list.is_empty())
             .is_some()
         {
-            if let Ok(false) = self
+            if let Some(excluded_credential) = self
                 .store()
                 .find_credentials(input.exclude_list.as_deref(), &input.rp.id)
-                .await
-                .map(|creds| creds.is_empty())
+                .await?
+                .first()
             {
+                self.check_user(
+                    UIHint::InformExcludedCredentialFound(excluded_credential),
+                    &input.options,
+                )
+                .await?;
+
                 return Err(Ctap2Error::CredentialExcluded.into());
             }
         }
@@ -84,11 +90,7 @@ where
             return Err(Ctap2Error::UnsupportedOption.into());
         }
 
-        // 8. If the authenticator has a display, show the items contained within the user and rp
-        //    parameter structures to the user. Alternatively, request user interaction in an
-        //    authenticator-specific way (e.g., flash the LED light). Request permission to create
-        //    a credential. If the user declines permission, return the CTAP2_ERR_OPERATION_DENIED
-        //    error.
+        // 8. Moving step 8 to after step 9 so that the new credential can be displayed to the user
 
         // 9. Generate a new credential key pair for the algorithm specified.
         let credential_id: Vec<u8> = {
@@ -118,6 +120,18 @@ where
                 false => None,
             },
         };
+
+        // 8. If the authenticator has a display, show the items contained within the user and rp
+        //    parameter structures to the user. Alternatively, request user interaction in an
+        //    authenticator-specific way (e.g., flash the LED light). Request permission to create
+        //    a credential. If the user declines permission, return the CTAP2_ERR_OPERATION_DENIED
+        //    error.
+        let flags = self
+            .check_user(
+                UIHint::RequestNewCredential(&input.user.clone().into(), &input.rp, &input.options),
+                &input.options,
+            )
+            .await?;
 
         // 10. If "rk" in options parameter is set to true:
         //     1. If a credential for the same RP ID and account ID already exists on the
@@ -178,7 +192,7 @@ mod tests {
     use super::*;
     use crate::{
         credential_store::{DiscoverabilitySupport, StoreInfo},
-        user_validation::MockUserValidationMethod,
+        user_validation::{MockUIHint, MockUserValidationMethod},
         MemoryStore,
     };
 
@@ -212,13 +226,19 @@ mod tests {
 
     #[tokio::test]
     async fn assert_storage_on_success() {
+        let request = good_request();
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user_with_hint(
+            1,
+            MockUIHint::RequestNewCredential(
+                request.user.clone().into(),
+                request.rp.clone(),
+                request.options.clone(),
+            ),
+        );
 
         let mut authenticator =
             Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
-
-        let request = good_request();
 
         authenticator
             .make_credential(request)
@@ -250,7 +270,10 @@ mod tests {
             counter: None,
         };
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user_with_hint(
+            1,
+            MockUIHint::InformExcludedCredentialFound(passkey.clone()),
+        );
 
         shared_store.lock().await.insert(cred_id.into(), passkey);
 
@@ -268,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn assert_unsupported_algorithm() {
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user(0);
         let mut authenticator =
             Authenticator::new(Aaguid::new_empty(), MemoryStore::new(), user_mock);
 
@@ -347,7 +370,7 @@ mod tests {
 
         // Arrange
         let store = StoreWithoutDiscoverableSupport;
-        let user_mock = MockUserValidationMethod::verified_user(1);
+        let user_mock = MockUserValidationMethod::verified_user(0);
         let request = good_request();
         let mut authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
         authenticator.set_make_credentials_with_signature_counter(true);

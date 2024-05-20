@@ -1,7 +1,34 @@
-use passkey_types::{ctap2::Ctap2Error, Passkey};
+use passkey_types::{
+    ctap2::{
+        get_assertion::Options,
+        make_credential::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity},
+        Ctap2Error,
+    },
+    Passkey,
+};
 
 #[cfg(doc)]
 use crate::Authenticator;
+
+/// Additional information that can be displayed to the user if the authenticator has a display.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UIHint<'a, P> {
+    /// Inform the user that the operation cannot be completed because the user already has a credential registered.
+    InformExcludedCredentialFound(&'a P),
+
+    /// Inform the user that the operation cannot be completed because the user has no matching credentials registered.
+    InformNoCredentialsFound,
+
+    /// Request permission to save the credential in this object.
+    RequestNewCredential(
+        &'a PublicKeyCredentialUserEntity,
+        &'a PublicKeyCredentialRpEntity,
+        &'a Options,
+    ),
+
+    /// Request permission to use the existing credential in this object.
+    RequestExistingCredential(&'a P),
+}
 
 /// The result of a user validation check.
 #[derive(Clone, Copy, PartialEq)]
@@ -24,12 +51,12 @@ pub trait UserValidationMethod {
     /// Check for the user's presence and obtain consent for the operation. The operation may
     /// also require the user to be verified.
     ///
-    /// * `crdential` - Can be used to display additional information about the operation to the user.
+    /// * `credential` - Can be used to display additional information about the operation to the user.
     /// * `presence` - Indicates whether the user's presence is required.
     /// * `verification` - Indicates whether the user should be verified.
-    async fn check_user(
+    async fn check_user<'a>(
         &self,
-        credential: Option<Self::PasskeyItem>,
+        hint: UIHint<'a, Self::PasskeyItem>,
         presence: bool,
         verification: bool,
     ) -> Result<UserCheck, Ctap2Error>;
@@ -54,6 +81,20 @@ pub trait UserValidationMethod {
     /// If a device is capable of verifying the user within itself as well as able to do Client PIN,
     ///  it will return both `Some` and the Client PIN option.
     async fn is_verification_enabled(&self) -> Option<bool>;
+}
+
+/// A version of the [`UIHint`] that uses a [`Passkey`] as the passkey item, is not tied to any specific lifetime,
+/// and does not verify new passkey items which contain new random data that the tests cannot know about beforehand.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MockUIHint {
+    InformExcludedCredentialFound(Passkey),
+    InformNoCredentialsFound,
+    RequestNewCredential(
+        PublicKeyCredentialUserEntity,
+        PublicKeyCredentialRpEntity,
+        Options,
+    ),
+    RequestExistingCredential(Passkey),
 }
 
 #[cfg(any(test, feature = "testable"))]
@@ -87,18 +128,36 @@ impl MockUserValidationMethod {
     }
 
     /// Sets up the mock for returning true for the verification.
-    pub fn verified_user_with_credential(times: usize, credential: Passkey) -> Self {
+    pub fn verified_user_with_hint(times: usize, expected_hint: MockUIHint) -> Self {
         let mut user_mock = MockUserValidationMethod::new();
         user_mock
             .expect_is_verification_enabled()
-            .returning(|| Some(true));
+            .returning(|| Some(true))
+            .times(..);
+        user_mock
+            .expect_is_presence_enabled()
+            .returning(|| true)
+            .times(..);
         user_mock
             .expect_check_user()
-            .with(
-                mockall::predicate::eq(Some(credential)),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(true),
-            )
+            .withf(move |actual_hint, presence, verification| {
+                *presence
+                    && *verification
+                    && match &expected_hint {
+                        MockUIHint::InformExcludedCredentialFound(p) => {
+                            actual_hint == &UIHint::InformExcludedCredentialFound(p)
+                        }
+                        MockUIHint::InformNoCredentialsFound => {
+                            matches!(actual_hint, UIHint::InformNoCredentialsFound)
+                        }
+                        MockUIHint::RequestNewCredential(user, rp, options) => {
+                            actual_hint == &UIHint::RequestNewCredential(user, rp, options)
+                        }
+                        MockUIHint::RequestExistingCredential(p) => {
+                            actual_hint == &UIHint::RequestExistingCredential(p)
+                        }
+                    }
+            })
             .returning(|_, _, _| {
                 Ok(UserCheck {
                     presence: true,
