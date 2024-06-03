@@ -128,7 +128,7 @@ where
         //    error.
         let flags = self
             .check_user(
-                UIHint::RequestNewCredential(&input.user.clone().into(), &input.rp, &input.options),
+                UIHint::RequestNewCredential(&input.user.clone().into(), &input.rp),
                 &input.options,
             )
             .await?;
@@ -230,11 +230,7 @@ mod tests {
         let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
         let user_mock = MockUserValidationMethod::verified_user_with_hint(
             1,
-            MockUIHint::RequestNewCredential(
-                request.user.clone().into(),
-                request.rp.clone(),
-                request.options.clone(),
-            ),
+            MockUIHint::RequestNewCredential(request.user.clone().into(), request.rp.clone()),
         );
 
         let mut authenticator =

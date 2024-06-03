@@ -1,6 +1,5 @@
 use passkey_types::{
     ctap2::{
-        get_assertion::Options,
         make_credential::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity},
         Ctap2Error,
     },
@@ -23,7 +22,6 @@ pub enum UIHint<'a, P> {
     RequestNewCredential(
         &'a PublicKeyCredentialUserEntity,
         &'a PublicKeyCredentialRpEntity,
-        &'a Options,
     ),
 
     /// Request permission to use the existing credential in this object.
@@ -89,11 +87,7 @@ pub trait UserValidationMethod {
 pub enum MockUIHint {
     InformExcludedCredentialFound(Passkey),
     InformNoCredentialsFound,
-    RequestNewCredential(
-        PublicKeyCredentialUserEntity,
-        PublicKeyCredentialRpEntity,
-        Options,
-    ),
+    RequestNewCredential(PublicKeyCredentialUserEntity, PublicKeyCredentialRpEntity),
     RequestExistingCredential(Passkey),
 }
 
@@ -150,8 +144,8 @@ impl MockUserValidationMethod {
                         MockUIHint::InformNoCredentialsFound => {
                             matches!(actual_hint, UIHint::InformNoCredentialsFound)
                         }
-                        MockUIHint::RequestNewCredential(user, rp, options) => {
-                            actual_hint == &UIHint::RequestNewCredential(user, rp, options)
+                        MockUIHint::RequestNewCredential(user, rp) => {
+                            actual_hint == &UIHint::RequestNewCredential(user, rp)
                         }
                         MockUIHint::RequestExistingCredential(p) => {
                             actual_hint == &UIHint::RequestExistingCredential(p)
