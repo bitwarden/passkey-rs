@@ -3,6 +3,7 @@ use coset::iana;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
+#[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 
 use crate::{
@@ -24,7 +25,7 @@ use crate::{
 };
 
 /// The response to the successful creation of a PublicKeyCredential
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub type CreatedPublicKeyCredential = PublicKeyCredential<AuthenticatorAttestationResponse>;
 
 /// This is the expected input to [`navigator.credentials.create`] when wanting to create a webauthn
@@ -35,7 +36,7 @@ pub type CreatedPublicKeyCredential = PublicKeyCredential<AuthenticatorAttestati
 /// [`navigator.credentials.create`]: https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/create
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct CredentialCreationOptions {
     /// The key defining that this is a request for a webauthn credential.
     pub public_key: PublicKeyCredentialCreationOptions,
@@ -46,7 +47,7 @@ pub struct CredentialCreationOptions {
 /// <https://w3c.github.io/webauthn/#dictdef-publickeycredentialcreationoptions>
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialCreationOptions {
     /// This member contains a name and an identifier for the [Relying Party] responsible for the request.
     ///
@@ -169,7 +170,7 @@ pub struct PublicKeyCredentialCreationOptions {
 ///
 /// <https://w3c.github.io/webauthn/#dictdef-publickeycredentialrpentity>
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialRpEntity {
     /// A unique identifier for the [Relying Party] entity, which sets the [RP ID].
     ///
@@ -223,7 +224,7 @@ pub struct PublicKeyCredentialRpEntity {
 /// [Lang]: https://w3c.github.io/webauthn/#sctn-strings-langdir
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialUserEntity {
     /// The user handle of the user account. A user handle is an opaque byte sequence with a maximum
     /// size of 64 bytes, and is not meant to be displayed to the user.
@@ -274,7 +275,7 @@ pub struct PublicKeyCredentialUserEntity {
 ///
 /// <https://w3c.github.io/webauthn/#dictdef-publickeycredentialparameters>
 #[derive(Debug, Serialize, Deserialize)]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialParameters {
     /// This member specifies the type of credential to be created. The value SHOULD be a member of
     /// [`PublicKeyCredentialType`] but client platforms MUST ignore unknown values, ignoring any
@@ -282,6 +283,7 @@ pub struct PublicKeyCredentialParameters {
     #[serde(rename = "type", deserialize_with = "ignore_unknown")]
     pub ty: PublicKeyCredentialType,
 
+    #[cfg(feature = "typeshare")]
     /// This member specifies the cryptographic signature algorithm with which the newly generated
     /// credential will be used, and thus also the type of asymmetric key pair to be generated,
     /// e.g., RSA or Elliptic Curve.
@@ -291,6 +293,17 @@ pub struct PublicKeyCredentialParameters {
     /// >       sent over a low-bandwidth link.
     #[serde(with = "i64_to_iana")]
     #[typeshare(serialized_as = "I54")] // because i64 fails for js
+    pub alg: iana::Algorithm,
+
+    #[cfg(not(feature = "typeshare"))]
+    /// This member specifies the cryptographic signature algorithm with which the newly generated
+    /// credential will be used, and thus also the type of asymmetric key pair to be generated,
+    /// e.g., RSA or Elliptic Curve.
+    ///
+    /// > Note: we use `alg` as the latter member name, rather than spelling-out `algorithm`,
+    /// >       because it will be serialized into a message to the authenticator, which may be
+    /// >       sent over a low-bandwidth link.
+    #[serde(with = "i64_to_iana")]
     pub alg: iana::Algorithm,
 }
 
@@ -324,7 +337,7 @@ impl PublicKeyCredentialParameters {
 /// [Relying Parties]: https://w3c.github.io/webauthn/#webauthn-relying-party
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct AuthenticatorSelectionCriteria {
     /// If this member is present, eligible authenticators are filtered to be only those
     /// authenticators attached with the specified [`AuthenticatorAttachment`] modality. If this
@@ -388,7 +401,7 @@ pub struct AuthenticatorSelectionCriteria {
 /// [discoverable credential]: https://w3c.github.io/webauthn/#client-side-discoverable-credential
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-#[typeshare(serialized_as = "String")]
+#[cfg_attr(feature = "typeshare", typeshare(serialized_as = "String"))]
 pub enum ResidentKeyRequirement {
     /// The Relying Party prefers creating a [server-side credential], but will accept a client-side
     /// discoverable credential. The client and authenticator SHOULD create a server-side credential
@@ -425,7 +438,7 @@ pub enum ResidentKeyRequirement {
 /// [attestation conveyance]: https://w3c.github.io/webauthn/#attestation-conveyance
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-#[typeshare(serialized_as = "String")]
+#[cfg_attr(feature = "typeshare", typeshare(serialized_as = "String"))]
 pub enum AttestationConveyancePreference {
     /// The Relying Party is not interested in authenticator attestation. For example, in order to
     /// potentially avoid having to obtain user consent to relay identifying information to the
@@ -474,7 +487,7 @@ pub enum AttestationConveyancePreference {
 /// [2]: https://w3c.github.io/webauthn/#sctn-attstn-fmt-ids
 #[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub enum AttestationStatementFormatIdentifiers {
     /// The `packed` attestation statement format is a WebAuthn-optimized format for attestation.
     /// It uses a very compact but still extensible encoding method. This format is implementable by
@@ -516,7 +529,7 @@ pub enum AttestationStatementFormatIdentifiers {
 /// [Relying Party]: https://w3c.github.io/webauthn/#relying-party
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct AuthenticatorAttestationResponse {
     /// This attribute contains the JSON serialization of [`CollectedClientData`] passed to the
     /// authenticator by the client in order to generate this credential. The exact JSON serialization
@@ -533,10 +546,17 @@ pub struct AuthenticatorAttestationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_key: Option<Bytes>,
 
+    #[cfg(feature = "typeshare")]
     /// This is the [CoseAlgorithmIdentifier] of the new credential
     ///
     /// [CoseAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
     #[typeshare(serialized_as = "I54")] // because i64 fails for js
+    pub public_key_algorithm: i64,
+
+    #[cfg(not(feature = "typeshare"))]
+    /// This is the [CoseAlgorithmIdentifier] of the new credential
+    ///
+    /// [CoseAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
     pub public_key_algorithm: i64,
 
     /// This attribute contains an attestation object, which is opaque to, and cryptographically
@@ -626,7 +646,7 @@ where
 
 /// Used to limit the values of [`CollectedClientData::ty`] and serializes to static strings.
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub enum ClientDataType {
     /// Serializes to the string `"webauthn.create"`
     #[serde(rename = "webauthn.create")]

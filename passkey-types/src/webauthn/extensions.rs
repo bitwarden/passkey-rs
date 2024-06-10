@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 
 #[cfg(doc)]
@@ -12,7 +13,7 @@ use crate::webauthn::PublicKeyCredential;
 /// [WebAuthn Extensions]: https://w3c.github.io/webauthn/#webauthn-extensions
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct AuthenticationExtensionsClientInputs {
     /// Boolean to indicate that this extension is requested by the relying party.
     ///
@@ -29,7 +30,7 @@ pub struct AuthenticationExtensionsClientInputs {
 /// [WebAuthn Extensions]: https://w3c.github.io/webauthn/#webauthn-extensions
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct AuthenticatorExtensionsClientOutputs {
     /// Contains properties of the given [`PublicKeyCredential`] when it is included.
     ///
@@ -47,7 +48,7 @@ pub struct AuthenticatorExtensionsClientOutputs {
 /// [Relying Party]: https://w3c.github.io/webauthn/#relying-party
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct CredentialPropertiesOutput {
     /// This OPTIONAL property, known abstractly as the resident key credential property
     /// (i.e., client-side [discoverable credential] property), is a Boolean value indicating whether

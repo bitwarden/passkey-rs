@@ -17,6 +17,7 @@ workspace = true
 [features]
 default = []
 serialize_bytes_as_base64_string = []
+typeshare = ["dep:typeshare"]
 
 [dependencies]
 bitflags = "2"
@@ -28,7 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 strum = { version = "0.25", features = ["derive"] }
-typeshare = "1"
+typeshare = { version = "1", optional = true }
 # TODO: investigate rolling our own IANA listings and COSE keys
 coset = "0.3"
 
