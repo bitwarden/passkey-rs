@@ -17,6 +17,7 @@ workspace = true
 [features]
 tokio = ["dep:tokio"]
 testable = ["dep:mockall"]
+typeshare = ["passkey-types/typeshare", "dep:typeshare"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,7 +29,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ciborium = "0.2"
 mockall = { version = "0.11", optional = true }
-typeshare = "1"
+typeshare = { version = "1", optional = true }
 idna = "0.5"
 url = "2"
 coset = "0.3"

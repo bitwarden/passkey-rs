@@ -3,6 +3,7 @@
 //! [WebAuthn Level 3]: https://w3c.github.io/webauthn
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 
 use crate::{utils::serde::ignore_unknown, Bytes};
@@ -37,7 +38,7 @@ impl AuthenticatorResponse for AuthenticatorAttestationResponse {}
 /// <https://w3c.github.io/webauthn/#iface-pkcredential>
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredential<R: AuthenticatorResponse> {
     /// The id contains the credential ID, chosen by the authenticator. This is usually the base64url
     /// encoded data of [Self::raw_id]

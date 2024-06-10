@@ -34,13 +34,14 @@ use passkey_types::{
     Passkey,
 };
 use serde::Serialize;
+#[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 use url::Url;
 
 #[cfg(test)]
 mod tests;
 
-#[typeshare]
+#[cfg_attr(feature = "typeshare", typeshare)]
 #[derive(Debug, serde::Serialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "content")]
 /// Errors produced by Webauthn Operations.
