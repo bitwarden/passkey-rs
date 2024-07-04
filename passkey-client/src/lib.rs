@@ -19,7 +19,6 @@ pub use client_data::*;
 
 use std::borrow::Cow;
 
-use ciborium::{cbor, value::Value};
 use coset::{iana::EnumI64, Algorithm};
 use passkey_authenticator::{
     Authenticator, CredentialStore, DiscoverabilitySupport, UserValidationMethod,
@@ -237,21 +236,6 @@ where
             .await
             .map_err(|sc| WebauthnError::AuthenticatorError(sc.into()))?;
 
-        let mut attestation_object = Vec::with_capacity(128);
-        // SAFETY: The Results here are from serializing all the internals of `cbor!` into `ciborium::Value`
-        // then serializing said value to bytes. The unwraps here are safe because it would otherwise be
-        // programmer error.
-        // TODO: Create strong attestation type definitions, part of CTAP2
-        let attestation_object_value = cbor!({
-               // TODO: Follow preference and/or implement AnonCA https://w3c.github.io/webauthn/#anonymization-ca
-               "fmt" => "none",
-                "attStmt" => {},
-                // Explicitly define these fields as bytes since specialization is still fairly far
-               "authData" => Value::Bytes(ctap2_response.auth_data.to_vec()),
-        })
-        .unwrap();
-        ciborium::ser::into_writer(&attestation_object_value, &mut attestation_object).unwrap();
-
         // SAFETY: this unwrap is safe because the ctap2_response was just created in make_credential()
         // above, which currently sets auth_data.attested_credential_data unconditionally.
         // If this fails, it's a programmer error in that the postconditions of make_credential will
@@ -298,7 +282,7 @@ where
                 authenticator_data: ctap2_response.auth_data.to_vec().into(),
                 public_key,
                 public_key_algorithm: alg,
-                attestation_object: attestation_object.into(),
+                attestation_object: ctap2_response.as_bytes(),
                 transports: auth_info.transports,
             },
             authenticator_attachment: Some(self.authenticator().attachment_type()),
