@@ -1,7 +1,7 @@
 [package]
 name = "passkey-client"
-version = "0.3.1"
 description = "Webauthn client in Rust."
+version = "0.2.0"
 include = ["src/", "../LICENSE-APACHE", "../LICENSE-MIT"]
 readme = "README.md"
 authors.workspace = true
@@ -18,11 +18,12 @@ workspace = true
 tokio = ["dep:tokio"]
 testable = ["dep:mockall"]
 typeshare = ["passkey-types/typeshare", "dep:typeshare"]
+android-asset-validation = ["dep:nom"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-passkey-authenticator = { path = "../passkey-authenticator", version = "0.3" }
+passkey-authenticator = { path = "../passkey-authenticator", version = "0.2" }
 passkey-types = { path = "../passkey-types", version = "0.2" }
 public-suffix = { path = "../public-suffix", version = "0.1" }
 serde = { version = "1", features = ["derive"] }
@@ -34,11 +35,13 @@ idna = "0.5"
 url = "2"
 coset = "0.3"
 tokio = { version = "1", features = ["sync"], optional = true }
+nom = { version = "7", features = ["alloc"], optional = true }
 
 [dev-dependencies]
 coset = "0.3"
+mockall = { version = "0.11" }
 passkey-authenticator = { path = "../passkey-authenticator", features = [
-  "tokio",
-  "testable",
+    "tokio",
+    "testable",
 ] }
 tokio = { version = "1", features = ["macros", "rt"] }

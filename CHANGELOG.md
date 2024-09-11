@@ -1,51 +1,29 @@
 # Changelog
 
-## Paskey v0.3.1
-### passkey-client v0.3.1
+## Unreleased
 
-The client now supports additional user-defined properties in the client data, while also clarifying how the client
-handles client data and its hash.
+### passkey-authenticator
 
-- Change `register` and `authenticate` to take a `ClientData<E>` instead of `Option<Vec<u8>>`.
-- Custom client data hashes are now specified using `DefaultClientDataWithCustomHash(Vec<u8>)` instead of 
-  `Some(Vec<u8>)`.
-- Additional fields can be added to the client data using `DefaultClientDataWithExtra(ExtraData)`.
+- Added: support for signature counters
+	- ⚠ BREAKING: Add `update_credential` function to `CredentialStore` ([#23](https://github.com/1Password/passkey-rs/pull/23)).
+	- Add `make_credentials_with_signature_counter` to `Authenticator`.
+- ⚠ BREAKING: Merge functions in `UserValidationMethod` ([#24](https://github.com/1Password/passkey-rs/pull/24))
+	- Removed: `UserValidationMethod::check_user_presence`
+	- Removed: `UserValidationMethod::check_user_verification`
+	- Added: `UserValidationMethod::check_user`. This function now performs both user presence and user verification checks.
+		The function now also returns which validations were performed, even if they were not requested.
 
-### passkey-client v0.2.1
+### passkey-client
 
-`CollectedClientData` is now generic and supports additional strongly typed fields.
-
-- `CollectedClientData` has changed to `CollectedClientData<E = ()>`
-
-## Passkey v0.3.0
-### passkey-authenticator v0.3.0
-
-The changes in this version are centered around giving the users of this library more control over the validation process.
-The `UserValidationMethod` trait has been updated to give the implementation more information about the request, which can be
-used to decide whether additional validations are needed. To reflect this, the `UserValidationMethod` trait now also
-returns which validations were performed.
-
-- ⚠ BREAKING: Consolidated `UserValidationMethod::check_user_presence` and `UserValidationMethod::check_user_verification`
-  into a single `UserValidationMethod::check_user` method ([#5](https://github.com/bitwarden/passkey-rs/pull/5)).
-
-### passkey-client v0.3.0
-
-Updated to support the changes in `passkey-authenticator` v0.3.0.
-
-## Passkey v0.2.1
-### passkey-authenticator v0.2.1
-
-These changes add functionality without breaking previously working stores. However, it does change
-the semantics of `save_credential` whose doc said that it should be used for both saving and updating.
-`update_credential` only needs to be implemented if the authenticator supports signature counters.
-
-- Add support for signature counters
-	- ⚠ BREAKING: Add `update_credential` function to store ([#3](https://github.com/bitwarden/passkey-rs/pull/3)).
-	- Add `make_credentials_with_signature_counter` to `authenticator`.
-
-### passkey-client v0.2.1
-
-- The client no longer hardcodes the UV value sent to the authenticator. ([#2](https://github.com/bitwarden/passkey-rs/pull/2))
+- Changed: The `Client` no longer hardcodes the UV value sent to the `Authenticator` ([#22](https://github.com/1Password/passkey-rs/pull/22)).
+- Changed: The `Client` no longer hardcodes the RK value sent to the `Authenticator` ([#27](https://github.com/1Password/passkey-rs/pull/27)).
+- Added: The `Client` now has the ability to adjust the response for quirky relying parties
+	when a fully featured response would break their server side validation. ([#31](https://github.com/1Password/passkey-rs/pull/31))
+- ⚠ BREAKING: Added the `Origin` enum which is now the origin parameter for the following methods ([#32](https://github.com/1Password/passkey-rs/pull/27)):
+	- `Client::register` takes an `impl Into<Origin>` instead of a `&Url`
+	- `Client::authenticate` takes an `impl Into<Origin>` instead of a `&Url`
+	- `RpIdValidator::assert_domain` takes an `&Origin` instead of a `&Url`
+- ⚠ BREAKING: The collected client data will now have the android app signature as the origin when a request comes from an app directly. ([#32](https://github.com/1Password/passkey-rs/pull/27))
 
 ## Passkey v0.2.0
 ### passkey-types v0.2.0
