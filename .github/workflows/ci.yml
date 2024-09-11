@@ -78,8 +78,11 @@ jobs:
             lang: swift
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/install@v0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          crate: typeshare-cli
-          version: "1.7.0"
+          toolchain: ${{ matrix.rust }}
+      - uses: clechasseur/rs-cargo@v2
+        with:
+          command: install
+          args: --version 1.7.0 --locked typeshare-cli
       - run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}
