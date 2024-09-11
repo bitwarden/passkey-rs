@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - stable
+          - 1.79.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -32,7 +32,7 @@ jobs:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
-          - stable
+          - 1.79.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -49,7 +49,7 @@ jobs:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
-          - stable
+          - 1.79.0
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -64,7 +64,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - stable
+          - 1.79.0
         lang:
           - typescript
           - kotlin
