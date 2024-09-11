@@ -24,6 +24,14 @@
 	- `Client::authenticate` takes an `impl Into<Origin>` instead of a `&Url`
 	- `RpIdValidator::assert_domain` takes an `&Origin` instead of a `&Url`
 - ⚠ BREAKING: The collected client data will now have the android app signature as the origin when a request comes from an app directly. ([#32](https://github.com/1Password/passkey-rs/pull/27))
+- `CollectedClientData` is now generic and supports additional strongly typed fields.
+  - `CollectedClientData` has changed to `CollectedClientData<E = ()>`
+- The client now supports additional user-defined properties in the client data, while also clarifying how the client
+handles client data and its hash.
+  - ⚠ BREAKING: Change `register` and `authenticate` to take a `ClientData<E>` instead of `Option<Vec<u8>>`.
+  - Custom client data hashes are now specified using `DefaultClientDataWithCustomHash(Vec<u8>)` instead of 
+    `Some(Vec<u8>)`.
+  - Additional fields can be added to the client data using `DefaultClientDataWithExtra(ExtraData)`.
 
 ## Passkey v0.2.0
 ### passkey-types v0.2.0
