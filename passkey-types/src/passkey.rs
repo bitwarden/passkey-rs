@@ -20,7 +20,7 @@ use coset::CoseKey;
 /// [cred-src]: https://w3c.github.io/webauthn/#public-key-credential-source
 // TODO: Implement Zeroize on this if/when rolling our own CoseKey type
 // TODO: use `#[non_exhaustive]` here with a builder pattern for building new passkeys
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Passkey {
     /// The private key in COSE key format.
     ///
@@ -146,6 +146,17 @@ impl Passkey {
         };
 
         (passkey, user_entity, rp)
+    }
+}
+
+/// Custom PartialEq implementation for Passkey which skips the key field due to security reasons.
+/// See: https://github.com/1Password/passkey-rs/pull/24#discussion_r1633858167
+impl PartialEq for Passkey {
+    fn eq(&self, other: &Self) -> bool {
+        self.credential_id == other.credential_id
+            && self.rp_id == other.rp_id
+            && self.user_handle == other.user_handle
+            && self.counter == other.counter
     }
 }
 
