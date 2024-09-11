@@ -17,8 +17,8 @@ jobs:
         rust:
           - 1.79.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
@@ -34,8 +34,8 @@ jobs:
           # Once we settle on a MSRV we should add that here.
           - 1.79.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
@@ -51,8 +51,8 @@ jobs:
           # Once we settle on a MSRV we should add that here.
           - 1.79.0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
+      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
@@ -77,11 +77,11 @@ jobs:
           - fs: swift
             lang: swift
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
+      - uses: actions-rust-lang/setup-rust-toolchain@1fbea72663f6d4c03efaab13560c8a24cfd2a7cc #v1
         with:
           toolchain: ${{ matrix.rust }}
-      - uses: clechasseur/rs-cargo@v2
+      - uses: clechasseur/rs-cargo@34eb9ee3e4186e5c7820a54393fbf081f78bc102 #v2
         with:
           command: install
           args: --version 1.7.0 --locked typeshare-cli
