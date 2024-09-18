@@ -115,10 +115,7 @@ where
             rp_id: input.rp.id.clone(),
             credential_id: credential_id.into(),
             user_handle: input.options.rk.then_some(input.user.id.clone()),
-            counter: match self.make_credentials_with_signature_counter {
-                true => Some(0),
-                false => None,
-            },
+            counter: self.make_credentials_with_signature_counter.then_some(0),
         };
 
         // 8. If the authenticator has a display, show the items contained within the user and rp

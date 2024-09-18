@@ -44,7 +44,7 @@ pub struct UserCheck {
 #[async_trait::async_trait]
 pub trait UserValidationMethod {
     /// The type of the passkey item that can be used to display additional information about the operation to the user.
-    type PasskeyItem: TryInto<Passkey> + Send;
+    type PasskeyItem: TryInto<Passkey> + Send + Sync;
 
     /// Check for the user's presence and obtain consent for the operation. The operation may
     /// also require the user to be verified.
@@ -96,6 +96,7 @@ impl MockUserValidationMethod {
     /// Sets up the mock for returning true for the verification.
     pub fn verified_user(times: usize) -> Self {
         let mut user_mock = MockUserValidationMethod::new();
+        user_mock.expect_is_presence_enabled().returning(|| true);
         user_mock
             .expect_is_verification_enabled()
             .returning(|| Some(true))
