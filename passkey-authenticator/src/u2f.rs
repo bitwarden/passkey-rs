@@ -225,8 +225,16 @@ mod tests {
 
         // Recover the VerifyingKey from the uncompressed X, Y points for the public key
         let ep = EncodedPoint::from_affine_coordinates(
-            public_key.x.as_slice().try_into().expect("slice length mismatch"),
-            public_key.y.as_slice().try_into().expect("slice length mismatch"),
+            public_key
+                .x
+                .as_slice()
+                .try_into()
+                .expect("slice length mismatch"),
+            public_key
+                .y
+                .as_slice()
+                .try_into()
+                .expect("slice length mismatch"),
             false,
         );
         let verifying_key = VerifyingKey::from_encoded_point(&ep).unwrap();

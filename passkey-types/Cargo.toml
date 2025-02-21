@@ -27,7 +27,7 @@ indexmap = { version = "2", features = ["serde"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-sha2 = "0.10"
+sha2 = "0.11.0-pre.4"
 strum = { version = "0.25", features = ["derive"] }
 typeshare = { version = "1", optional = true }
 # TODO: investigate rolling our own IANA listings and COSE keys
