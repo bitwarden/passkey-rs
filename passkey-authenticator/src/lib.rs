@@ -34,9 +34,7 @@ use coset::{
     CoseKey, CoseKeyBuilder,
 };
 use p256::{
-    ecdsa::SigningKey,
-    elliptic_curve::{generic_array::GenericArray, sec1::FromEncodedPoint},
-    pkcs8::EncodePublicKey,
+    ecdsa::SigningKey, elliptic_curve::sec1::FromEncodedPoint, pkcs8::EncodePublicKey,
     EncodedPoint, PublicKey, SecretKey,
 };
 use passkey_types::{ctap2::Ctap2Error, Bytes};
@@ -130,8 +128,8 @@ pub fn public_key_der_from_cose_key(key: &CoseKey) -> Result<Bytes, Ctap2Error> 
     };
 
     let point = EncodedPoint::from_affine_coordinates(
-        GenericArray::from_slice(x.as_slice()),
-        GenericArray::from_slice(y.as_slice()),
+        x.as_slice().try_into().expect("slice length mismatch"),
+        y.as_slice().try_into().expect("slice length mismatch"),
         false,
     );
     let Some(pub_key): Option<PublicKey> = PublicKey::from_encoded_point(&point).into() else {

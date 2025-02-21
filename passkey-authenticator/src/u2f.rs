@@ -128,7 +128,7 @@ impl<S: CredentialStore + Sync + Send, U: UserValidationMethod + Sync + Send> U2
         let id_bytes: Bytes = request.application.to_vec().into();
         let maybe_credential = self
             .store()
-            .find_credentials(Some(&[pk_descriptor]), String::from(id_bytes).as_str())
+            .find_credentials(Some(&[pk_descriptor][..]), String::from(id_bytes).as_str())
             .await
             .map_err(|_| U2FError::Other);
 
@@ -169,7 +169,6 @@ impl<S: CredentialStore + Sync + Send, U: UserValidationMethod + Sync + Send> U2
 mod tests {
     use super::{AuthenticationRequest, Authenticator, RegisterRequest};
     use crate::{u2f::U2fApi, user_validation::MockUserValidationMethod};
-    use generic_array::GenericArray;
     use p256::{
         ecdsa::{signature::Verifier, Signature, VerifyingKey},
         EncodedPoint,
@@ -226,8 +225,8 @@ mod tests {
 
         // Recover the VerifyingKey from the uncompressed X, Y points for the public key
         let ep = EncodedPoint::from_affine_coordinates(
-            &GenericArray::clone_from_slice(&public_key.x),
-            &GenericArray::clone_from_slice(&public_key.y),
+            public_key.x.as_slice().try_into().expect("slice length mismatch"),
+            public_key.y.as_slice().try_into().expect("slice length mismatch"),
             false,
         );
         let verifying_key = VerifyingKey::from_encoded_point(&ep).unwrap();
