@@ -6,15 +6,16 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 
-use crate::{utils::serde::ignore_unknown, Bytes};
+use crate::{Bytes, utils::serde::ignore_unknown};
 
 mod assertion;
 mod attestation;
 mod common;
 mod extensions;
+mod well_known;
 
 // re-export types
-pub use self::{assertion::*, attestation::*, common::*, extensions::*};
+pub use self::{assertion::*, attestation::*, common::*, extensions::*, well_known::*};
 
 mod sealed {
     pub trait Sealed {}
@@ -38,7 +39,13 @@ impl AuthenticatorResponse for AuthenticatorAttestationResponse {}
 /// <https://w3c.github.io/webauthn/#iface-pkcredential>
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "typeshare", typeshare)]
+#[cfg_attr(
+    feature = "typeshare",
+    typeshare(
+        swift = "Equatable, Hashable",
+        swiftGenericConstraints = "R: Equatable & Hashable"
+    )
+)]
 pub struct PublicKeyCredential<R: AuthenticatorResponse> {
     /// The id contains the credential ID, chosen by the authenticator. This is usually the base64url
     /// encoded data of [Self::raw_id]
@@ -48,7 +55,7 @@ pub struct PublicKeyCredential<R: AuthenticatorResponse> {
     /// authenticators.
     ///
     /// > NOTE: This API does not constrain the format or length of this identifier, except that it
-    /// MUST be sufficient for the authenticator to uniquely select a key.
+    /// > MUST be sufficient for the authenticator to uniquely select a key.
     pub id: String,
 
     /// The raw byte containing the credential ID, see [Self::id] for more information.
@@ -74,5 +81,5 @@ pub struct PublicKeyCredential<R: AuthenticatorResponse> {
     /// This object is a map containing extension identifier → client extension output entries
     /// produced by the extension’s client extension processing.
     #[serde(default)]
-    pub client_extension_results: AuthenticatorExtensionsClientOutputs,
+    pub client_extension_results: AuthenticationExtensionsClientOutputs,
 }

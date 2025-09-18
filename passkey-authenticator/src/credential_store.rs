@@ -2,13 +2,13 @@
 use std::sync::Arc;
 
 use passkey_types::{
+    Passkey,
     ctap2::{
+        Ctap2Error, StatusCode,
         get_assertion::Options,
         make_credential::{PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity},
-        Ctap2Error, StatusCode,
     },
     webauthn::PublicKeyCredentialDescriptor,
-    Passkey,
 };
 
 /// A struct that defines the capabilities of a store.
@@ -18,7 +18,7 @@ pub struct StoreInfo {
 }
 
 /// Enum to define how the store handles discoverability.
-/// Note that this is does not say anything about which storage mode will be used.
+/// Note that this does not say anything about which storage mode will be used.
 #[derive(PartialEq)]
 pub enum DiscoverabilitySupport {
     /// The store supports both discoverable and non-credentials.
@@ -31,6 +31,17 @@ pub enum DiscoverabilitySupport {
     /// The store only supports discoverable credential.
     /// No error will be returned if a non-discoverable credential is requested.
     ForcedDiscoverable,
+}
+
+impl DiscoverabilitySupport {
+    /// Helper method to determine if the store created a discoverable credential or not.
+    pub fn is_passkey_discoverable(&self, rk_input: bool) -> bool {
+        match self {
+            DiscoverabilitySupport::Full => rk_input,
+            DiscoverabilitySupport::OnlyNonDiscoverable => false,
+            DiscoverabilitySupport::ForcedDiscoverable => true,
+        }
+    }
 }
 
 /// Use this on a type that enables storage and fetching of credentials
@@ -47,6 +58,7 @@ pub trait CredentialStore {
         &self,
         ids: Option<&[PublicKeyCredentialDescriptor]>,
         rp_id: &str,
+        user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode>;
 
     /// Save the new credential into your store
@@ -78,6 +90,7 @@ impl CredentialStore for MemoryStore {
         &self,
         allow_credentials: Option<&[PublicKeyCredentialDescriptor]>,
         _rp_id: &str,
+        _user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
         let creds: Vec<Passkey> = allow_credentials
             .into_iter()
@@ -123,6 +136,7 @@ impl CredentialStore for Option<Passkey> {
         &self,
         id: Option<&[PublicKeyCredentialDescriptor]>,
         _rp_id: &str,
+        _user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
         if let Some(id) = id {
             id.iter().find_map(|id| {
@@ -170,8 +184,12 @@ impl<S: CredentialStore<PasskeyItem = Passkey> + Send + Sync> CredentialStore
         &self,
         ids: Option<&[PublicKeyCredentialDescriptor]>,
         rp_id: &str,
+        user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
-        self.lock().await.find_credentials(ids, rp_id).await
+        self.lock()
+            .await
+            .find_credentials(ids, rp_id, user_handle)
+            .await
     }
 
     async fn save_credential(
@@ -207,8 +225,12 @@ impl<S: CredentialStore<PasskeyItem = Passkey> + Send + Sync> CredentialStore
         &self,
         ids: Option<&[PublicKeyCredentialDescriptor]>,
         rp_id: &str,
+        user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
-        self.read().await.find_credentials(ids, rp_id).await
+        self.read()
+            .await
+            .find_credentials(ids, rp_id, user_handle)
+            .await
     }
 
     async fn save_credential(
@@ -244,8 +266,12 @@ impl<S: CredentialStore<PasskeyItem = Passkey> + Send + Sync> CredentialStore
         &self,
         ids: Option<&[PublicKeyCredentialDescriptor]>,
         rp_id: &str,
+        user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
-        self.lock().await.find_credentials(ids, rp_id).await
+        self.lock()
+            .await
+            .find_credentials(ids, rp_id, user_handle)
+            .await
     }
 
     async fn save_credential(
@@ -281,8 +307,12 @@ impl<S: CredentialStore<PasskeyItem = Passkey> + Send + Sync> CredentialStore
         &self,
         ids: Option<&[PublicKeyCredentialDescriptor]>,
         rp_id: &str,
+        user_handle: Option<&[u8]>,
     ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
-        self.read().await.find_credentials(ids, rp_id).await
+        self.read()
+            .await
+            .find_credentials(ids, rp_id, user_handle)
+            .await
     }
 
     async fn save_credential(

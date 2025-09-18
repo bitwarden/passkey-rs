@@ -1,5 +1,5 @@
 //! <https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticatorGetInfo>
-use std::{borrow::Cow, num::NonZeroU128};
+use std::num::NonZeroU128;
 
 use serde::{Deserialize, Serialize};
 
@@ -16,11 +16,11 @@ serde_workaround! {
         /// * "FIDO_2_0" for CTAP2 / FIDO2 / Web Authentication authenticators
         /// * "U2F_V2" for CTAP1/U2F authenticators.
         #[serde(rename = 0x01)]
-        pub versions: Vec<Cow<'static, str>>,
+        pub versions: Vec<Version>,
 
         /// List of supported extensions. (Optional)
         #[serde(rename = 0x02, default, skip_serializing_if = Option::is_none)]
-        pub extensions: Option<Vec<Cow<'static, str>>>,
+        pub extensions: Option<Vec<Extension>>,
 
         /// The claimed AAGUID. 16 bytes in length
         #[serde(rename = 0x03)]
@@ -40,7 +40,7 @@ serde_workaround! {
 
         /// List of supported PIN Protocol versions.
         ///
-        /// If we ever end up with more than 256 pin protocols, an enhacement request should be filed.
+        /// If we ever end up with more than 256 pin protocols, an enhancement request should be filed.
         #[serde(rename = 0x06, default, skip_serializing_if = Option::is_none)]
         pub pin_protocols: Option<Vec<u8>>,
 
@@ -128,125 +128,41 @@ impl Default for Options {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use ciborium::cbor;
-
-    use super::{Aaguid, AuthenticatorTransport, Options, Response};
-    #[test]
-    fn serialization_round_trip() {
-        let expected = Response {
-            versions: vec!["FIDO_2_0".into()],
-            extensions: None,
-            aaguid: Aaguid::new_empty(),
-            options: Some(Options {
-                rk: true,
-                uv: Some(true),
-                ..Default::default()
-            }),
-            max_msg_size: None,
-            pin_protocols: Some(vec![1]),
-            transports: Some(vec![
-                AuthenticatorTransport::Internal,
-                AuthenticatorTransport::Hybrid,
-            ]),
-        };
-        let mut serialized = Vec::new();
-        ciborium::ser::into_writer(&expected, &mut serialized)
-            .expect("Could not serialize to cbor");
-
-        let deserialized: Response =
-            ciborium::de::from_reader(serialized.as_slice()).expect("Could not deserialize");
-
-        assert_eq!(deserialized, expected);
-    }
-
-    #[test]
-    fn serialization_expected_wire_fmt() {
-        let aaguid = Aaguid::new_empty();
-        let input = Response {
-            versions: vec!["FIDO_2_0".into()],
-            extensions: None,
-            aaguid,
-            options: Some(Options {
-                rk: true,
-                uv: Some(true),
-                plat: false,
-                ..Default::default()
-            }),
-            max_msg_size: None,
-            pin_protocols: Some(vec![1]),
-            transports: Some(vec![
-                AuthenticatorTransport::Internal,
-                AuthenticatorTransport::Hybrid,
-            ]),
-        };
-        let mut serialized = Vec::new();
-        ciborium::ser::into_writer(&input, &mut serialized).expect("Could not serialize to cbor");
-
-        let deserialized: ciborium::value::Value =
-            ciborium::de::from_reader(serialized.as_slice()).expect("Could not deserialize");
-
-        let expected = cbor!({
-            0x01 => vec!["FIDO_2_0"],
-            // extensions should be skiped
-            0x03 => ciborium::value::Value::Bytes([0;16].into()),
-            0x04 => {
-                "plat" => false,
-                "rk" => true,
-                "up" => true,
-                "uv" => true
-                // clientPin should be skipped
-            },
-            // maxMsgSize should be skipped
-            0x06 => vec![1],
-            0x09 => vec!["internal", "hybrid"]
-        })
-        .unwrap();
-
-        assert_eq!(deserialized, expected);
-    }
-
-    #[test]
-    fn unknown_gets_ignored() {
-        let input = cbor!({
-            0x01 => vec!["FIDO_2_0"],
-            // extensions should be skiped
-            0x03 => ciborium::value::Value::Bytes([0;16].into()),
-            0x04 => {
-                "plat" => false,
-                "rk" => true,
-                "up" => true,
-                "uv" => true
-                // clientPin should be skipped
-            },
-            // maxMsgSize should be skipped
-            0x06 => vec![1],
-            0x09 => vec!["lora", "hybrid"]
-        })
-        .unwrap();
-
-        let mut serialized = Vec::new();
-        ciborium::ser::into_writer(&input, &mut serialized).expect("Could not serialize to cbor");
-
-        let deserialized: Response =
-            ciborium::de::from_reader(serialized.as_slice()).expect("Could not deserialize");
-
-        let expected = Response {
-            versions: vec!["FIDO_2_0".into()],
-            extensions: None,
-            aaguid: Aaguid::new_empty(),
-            options: Some(Options {
-                rk: true,
-                uv: Some(true),
-                plat: false,
-                ..Default::default()
-            }),
-            max_msg_size: None,
-            pin_protocols: Some(vec![1]),
-            transports: Some(vec![AuthenticatorTransport::Hybrid]),
-        };
-
-        assert_eq!(expected, deserialized);
-    }
+/// CTAP versions supported
+#[expect(non_camel_case_types)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Version {
+    /// Universal 2nd Factor version 1.2
+    U2F_V2,
+    /// Client To Authenticator Protocol version 2.0
+    FIDO_2_0,
+    /// Unknown version catching the value
+    #[serde(untagged)]
+    Unknown(String),
 }
+
+/// CTAP extensions supported by the authenticator
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Extension {
+    /// The authenticator supports the [`hmac-secret`] extension
+    ///
+    /// [`hmac-secret`]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#sctn-hmac-secret-extension
+    #[serde(rename = "hmac-secret")]
+    HmacSecret,
+    /// The authenticator supports the [`hmac-secret-mc`] extension.
+    ///
+    /// TODO: link to the hmac-secret-mc extension in the spec once it's published.
+    #[serde(rename = "hmac-secret-mc")]
+    HmacSecretMakeCredential,
+    /// The authenticator supports the unsigned [`prf`] extension
+    ///
+    /// [`prf`]: https://w3c.github.io/webauthn/#prf-extension
+    #[serde(rename = "prf")]
+    Prf,
+    /// The authenticator supports an extensions which is currently unsupported by this library.
+    #[serde(untagged)]
+    Unknown(String),
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,17 +1,21 @@
 //! <https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticatorGetAssertion>
+use serde::{Deserialize, Serialize};
+
 use crate::{
-    ctap2::AuthenticatorData,
-    webauthn::{
-        AuthenticationExtensionsClientInputs, PublicKeyCredentialDescriptor,
-        PublicKeyCredentialUserEntity,
-    },
     Bytes,
+    ctap2::AuthenticatorData,
+    webauthn::{PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity},
 };
 
 pub use crate::ctap2::make_credential::Options;
 
 #[cfg(doc)]
-use crate::webauthn::{CollectedClientData, PublicKeyCredentialRequestOptions};
+use {
+    crate::webauthn::{CollectedClientData, PublicKeyCredentialRequestOptions},
+    ciborium::value::Value,
+};
+
+use super::extensions::{AuthenticatorPrfGetOutputs, AuthenticatorPrfInputs, HmacGetSecretInput};
 
 serde_workaround! {
     /// While similar in structure to [`PublicKeyCredentialRequestOptions`],
@@ -36,7 +40,7 @@ serde_workaround! {
         /// Parameters to influence authenticator operation. These parameters might be authenticator
         /// specific.
         #[serde(rename = 0x04, default, skip_serializing_if = Option::is_none)]
-        pub extensions: Option<AuthenticationExtensionsClientInputs>,
+        pub extensions: Option<ExtensionInputs>,
 
         /// Parameters to influence authenticator operation, see [`Options`] for more details.
         #[serde(rename = 0x05, default)]
@@ -50,6 +54,41 @@ serde_workaround! {
         /// PIN protocol version chosen by the client
         #[serde(rename = 0x07, default, skip_serializing_if = Option::is_none)]
         pub pin_protocol: Option<u8>,
+    }
+}
+
+/// All supported Authenticator extensions inputs during credential assertion
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct ExtensionInputs {
+    /// The input salts for fetching and deriving a symmetric secret.
+    ///
+    /// <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#sctn-hmac-secret-extension>
+    #[serde(
+        rename = "hmac-secret",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hmac_secret: Option<HmacGetSecretInput>,
+
+    /// The direct input from a on-system client for the prf extension.
+    ///
+    /// The output from a request using the `prf` extension will not be signed
+    /// and will be un-encrypted.
+    /// This input should already be hashed by the client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prf: Option<AuthenticatorPrfInputs>,
+}
+
+impl ExtensionInputs {
+    /// Validates that there is at least one extension field that is `Some`.
+    /// If all fields are `None` then this returns `None` as well.
+    pub fn zip_contents(self) -> Option<Self> {
+        let Self { hmac_secret, prf } = &self;
+
+        let has_hmac_secret = hmac_secret.is_some();
+        let has_prf = prf.is_some();
+
+        (has_hmac_secret || has_prf).then_some(self)
     }
 }
 
@@ -106,5 +145,74 @@ serde_workaround! {
         /// file an enhancement request if this limit impacts your application.
         #[serde(rename = 0x05, default, skip_serializing_if = Option::is_none)]
         pub number_of_credentials: Option<u8>,
+
+        /// Indicates that a credential was selected by the user via interaction directly with the authenticator,
+        /// and thus the platform does not need to confirm the credential.
+        /// Optional; defaults to false.
+        /// MUST NOT be present in response to a request where an [`Request::allow_list`] was given,
+        /// where [`Self::number_of_credentials`] is greater than one,
+        ///  nor in response to an `authenticatorGetNextAssertion` request.
+        #[serde(rename = 0x06, default, skip_serializing_if = Option::is_none)]
+        pub user_selected: Option<bool>,
+
+        /// The contents of the associated `largeBlobKey` if present for the asserted credential,
+        /// and if [largeBlobKey[] was true in the extensions input.
+        ///
+        /// This extension is currently un-supported by this library.
+        #[serde(rename = 0x07, default, skip_serializing_if = Option::is_none)]
+        pub large_blob_key: Option<Bytes>,
+
+        /// A map, keyed by extension identifiers, to unsigned outputs of extensions, if any.
+        /// Authenticators SHOULD omit this field if no processed extensions define unsigned outputs.
+        /// Clients MUST treat an empty map the same as an omitted field.
+        #[serde(rename = 0x08, default, skip_serializing_if = Option::is_none)]
+        pub unsigned_extension_outputs: Option<UnsignedExtensionOutputs>,
+    }
+}
+
+/// All supported Authenticator extensions outputs during credential assertion
+///
+/// This is to be serialized to [`Value`] in [`AuthenticatorData::extensions`]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedExtensionOutputs {
+    /// Outputs the symmetric secrets after successful processing. The output MUST be encrypted.
+    ///
+    /// <https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#sctn-hmac-secret-extension>
+    #[serde(
+        rename = "hmac-secret",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hmac_secret: Option<Bytes>,
+}
+
+impl SignedExtensionOutputs {
+    /// Validates that there is at least one extension field that is `Some`.
+    /// If all fields are `None` then this returns `None` as well.
+    pub fn zip_contents(self) -> Option<Self> {
+        let Self { hmac_secret } = &self;
+        hmac_secret.is_some().then_some(self)
+    }
+}
+
+/// A map, keyed by extension identifiers, to unsigned outputs of extensions, if any.
+/// Authenticators SHOULD omit this field if no processed extensions define unsigned outputs.
+/// Clients MUST treat an empty map the same as an omitted field.
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UnsignedExtensionOutputs {
+    /// This output is supported in the Webauthn specification and will be used when the authenticator
+    /// and the client are in memory or communicating through an internal channel.
+    ///
+    /// If you are using transports where this needs to pass through a wire, use hmac-secret instead.
+    pub prf: Option<AuthenticatorPrfGetOutputs>,
+}
+
+impl UnsignedExtensionOutputs {
+    /// Validates that there is at least one extension field that is `Some`.
+    /// If all fields are `None` then this returns `None` as well.
+    pub fn zip_contents(self) -> Option<Self> {
+        let Self { prf } = &self;
+        prf.is_some().then_some(self)
     }
 }

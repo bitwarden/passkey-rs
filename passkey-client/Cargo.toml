@@ -1,47 +1,49 @@
 [package]
-name = "passkey-client"
-description = "Webauthn client in Rust."
-version = "0.2.0"
-include = ["src/", "../LICENSE-APACHE", "../LICENSE-MIT"]
-readme = "README.md"
 authors.workspace = true
-repository.workspace = true
-edition.workspace = true
-license.workspace = true
-keywords.workspace = true
 categories.workspace = true
+description = "Webauthn client in Rust."
+edition.workspace = true
+include = ["../LICENSE-APACHE", "../LICENSE-MIT", "src/"]
+keywords.workspace = true
+license.workspace = true
+name = "passkey-client"
+readme = "README.md"
+repository.workspace = true
+version = "0.5.0"
 
 [lints]
 workspace = true
 
 [features]
-tokio = ["dep:tokio"]
-testable = ["dep:mockall"]
-typeshare = ["passkey-types/typeshare", "dep:typeshare"]
 android-asset-validation = ["dep:nom"]
+testable = ["dep:mockall"]
+tokio = ["dep:tokio"]
+typeshare = ["passkey-types/typeshare", "dep:typeshare"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-passkey-authenticator = { path = "../passkey-authenticator", version = "0.2" }
-passkey-types = { path = "../passkey-types", version = "0.2" }
+ciborium = "0.2"
+coset = "0.3"
+idna = "1"
+itertools = "0.14"
+mockall = { version = "0.11", optional = true }
+nom = { version = "7", features = ["alloc"], optional = true }
+passkey-authenticator = { path = "../passkey-authenticator", version = "0.5" }
+passkey-types = { path = "../passkey-types", version = "0.5" }
 public-suffix = { path = "../public-suffix", version = "0.1" }
+reqwest = { version = "0.12", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ciborium = "0.2"
-mockall = { version = "0.11", optional = true }
-typeshare = { version = "1", optional = true }
-idna = "0.5"
-url = "2"
-coset = "0.3"
 tokio = { version = "1", features = ["sync"], optional = true }
-nom = { version = "7", features = ["alloc"], optional = true }
+typeshare = { version = "1", optional = true }
+url = "2"
 
 [dev-dependencies]
 coset = "0.3"
 mockall = { version = "0.11" }
-passkey-authenticator = { path = "../passkey-authenticator", features = [
-    "tokio",
-    "testable",
+passkey-authenticator = { path = "../passkey-authenticator", version = "0.5", features = [
+  "tokio",
+  "testable",
 ] }
 tokio = { version = "1", features = ["macros", "rt"] }

@@ -39,9 +39,12 @@ pub mod webauthn;
 
 // Re-exports
 pub use self::{
-    passkey::Passkey,
+    passkey::{CredentialExtensions, Passkey, StoredHmacSecret},
     utils::{
         bytes::{Bytes, NotBase64Encoded},
         crypto, encoding, rand,
     },
 };
+
+#[cfg(feature = "testable")]
+pub use self::passkey::PasskeyBuilder;

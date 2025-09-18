@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use serde::{de::Visitor, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Visitor};
 #[cfg(feature = "typeshare")]
 use typeshare::typeshare;
 
@@ -18,7 +18,7 @@ use super::encoding;
 ///
 /// It also supports deserializing from `base64` and `base64url` formatted strings.
 #[cfg_attr(feature = "typeshare", typeshare(transparent))]
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Hash)]
 #[repr(transparent)]
 pub struct Bytes(Vec<u8>);
 
@@ -39,6 +39,12 @@ impl DerefMut for Bytes {
 impl From<Vec<u8>> for Bytes {
     fn from(inner: Vec<u8>) -> Self {
         Bytes(inner)
+    }
+}
+
+impl From<&[u8]> for Bytes {
+    fn from(value: &[u8]) -> Self {
+        Bytes(value.to_vec())
     }
 }
 
@@ -154,37 +160,16 @@ impl<'de> Deserialize<'de> for Bytes {
                 }
                 Ok(Bytes(buf))
             }
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Bytes(v.to_vec()))
+            }
         }
         deserializer.deserialize_any(Base64Visitor)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    #[test]
-    fn deserialize_many_formats_into_base64urlvec() {
-        let json = r#"{
-            "array": [101,195,212,161,191,112,75,189,152,52,121,17,62,113,114,164],
-            "base64url": "ZcPUob9wS72YNHkRPnFypA",
-            "base64": "ZcPUob9wS72YNHkRPnFypA=="
-        }"#;
-
-        let deserialized: HashMap<&str, Bytes> =
-            serde_json::from_str(json).expect("failed to deserialize");
-
-        assert_eq!(deserialized["array"], deserialized["base64url"]);
-        assert_eq!(deserialized["base64url"], deserialized["base64"]);
-    }
-
-    #[test]
-    fn deserialization_should_fail() {
-        let json = r#"{
-            "array": ["ZcPUob9wS72YNHkRPnFypA","ZcPUob9wS72YNHkRPnFypA=="],
-        }"#;
-
-        serde_json::from_str::<HashMap<&str, Bytes>>(json)
-            .expect_err("did not give an error as expected.");
-    }
-}
+mod tests;

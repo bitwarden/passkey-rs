@@ -1,8 +1,15 @@
 use std::fmt::Debug;
 
 use super::u2f::{AuthenticationRequest, RegisterRequest, RegisterResponse};
-use crate::{ctap2::make_credential as ctap2, webauthn, Bytes};
+use crate::{Bytes, ctap2::make_credential as ctap2, webauthn};
 use coset::CoseKey;
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
+#[cfg(feature = "testable")]
+mod mock;
+
+#[cfg(feature = "testable")]
+pub use self::mock::PasskeyBuilder;
 
 /// The private WebAuthn credential containing all relevant required and optional information for an
 /// authentication ceremony.
@@ -21,6 +28,7 @@ use coset::CoseKey;
 // TODO: Implement Zeroize on this if/when rolling our own CoseKey type
 // TODO: use `#[non_exhaustive]` here with a builder pattern for building new passkeys
 #[derive(Clone)]
+#[cfg_attr(any(test, feature = "testable"), derive(PartialEq))]
 pub struct Passkey {
     /// The private key in COSE key format.
     ///
@@ -83,10 +91,13 @@ pub struct Passkey {
     ///
     /// [signCount]: https://w3c.github.io/webauthn/#signature-counter
     pub counter: Option<u32>,
+
+    /// Authenticator extensions that need data associated to passkey secrets
+    pub extensions: CredentialExtensions,
 }
 
 impl Passkey {
-    /// Standardised way to "upgrade" a U2F register request into a passkey
+    /// Standardized way to "upgrade" a U2F register request into a passkey
     pub fn from_u2f_register_response(
         request: &RegisterRequest,
         response: &RegisterResponse,
@@ -99,10 +110,11 @@ impl Passkey {
             rp_id: app_id.into(),
             user_handle: None,
             counter: Some(0),
+            extensions: Default::default(),
         }
     }
 
-    /// Updgrade a U2F Authentication Request into a Passkey
+    /// Upgrade a U2F Authentication Request into a Passkey
     pub fn from_u2f_auth_request(
         request: &AuthenticationRequest,
         counter: u32,
@@ -115,6 +127,7 @@ impl Passkey {
             rp_id: app_id.into(),
             user_handle: None,
             counter: Some(counter),
+            extensions: Default::default(),
         }
     }
 
@@ -147,16 +160,14 @@ impl Passkey {
 
         (passkey, user_entity, rp)
     }
-}
 
-/// Custom PartialEq implementation for Passkey which skips the key field due to security reasons.
-/// See: https://github.com/1Password/passkey-rs/pull/24#discussion_r1633858167
-impl PartialEq for Passkey {
-    fn eq(&self, other: &Self) -> bool {
-        self.credential_id == other.credential_id
-            && self.rp_id == other.rp_id
-            && self.user_handle == other.user_handle
-            && self.counter == other.counter
+    /// Create a passkey mock builder.
+    ///
+    /// The default credential Id length is 16, change it with the [`PasskeyBuilder::credential_id`]
+    /// method.
+    #[cfg(feature = "testable")]
+    pub fn mock(rp_id: String) -> PasskeyBuilder {
+        PasskeyBuilder::new(rp_id)
     }
 }
 
@@ -187,4 +198,22 @@ impl Debug for Passkey {
             .field("counter", &self.counter)
             .finish()
     }
+}
+
+/// Supported extensions on a [`Passkey`]
+#[derive(Default, Clone, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(any(test, feature = "testable"), derive(PartialEq))]
+pub struct CredentialExtensions {
+    /// Whether the passkey has hmac-secret credentials associated to it
+    pub hmac_secret: Option<StoredHmacSecret>,
+}
+
+/// The stored hmac-secret credentials associated to a [`Passkey`]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[cfg_attr(any(test, feature = "testable"), derive(PartialEq))]
+pub struct StoredHmacSecret {
+    /// The credential that must be gated behind user verification
+    pub cred_with_uv: Vec<u8>,
+    /// The credential that is not gated behind user verification, but is gated behind user presence
+    pub cred_without_uv: Option<Vec<u8>>,
 }

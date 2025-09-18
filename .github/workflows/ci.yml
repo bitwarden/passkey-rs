@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - 1.81.0
+          - 1.85.0
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
@@ -32,7 +32,7 @@ jobs:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
-          - 1.81.0
+          - 1.85.0
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
@@ -40,7 +40,30 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           components: rustfmt
-      - run: rustup run ${{ matrix.rust}} cargo fmt --all -- --check
+      - run: rustup run ${{ matrix.rust }} cargo fmt --all -- --check
+
+  semver-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+      - run: RUSTDOCFLAGS="-D warnings " rustup run ${{ matrix.rust }} cargo doc --workspace --no-deps --all-features
 
   test:
     name: Test
@@ -49,14 +72,14 @@ jobs:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
-          - 1.81.0
+          - 1.85.0
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
       - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
-      - run: rustup run ${{ matrix.rust }} cargo test --all-features
+      - run: rustup run ${{ matrix.rust }} cargo test
 
   typeshare:
     name: Typeshare
@@ -64,7 +87,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - 1.81.0
+          - 1.85.0
         lang:
           - typescript
           - kotlin
@@ -84,5 +107,5 @@ jobs:
       - uses: clechasseur/rs-cargo@34eb9ee3e4186e5c7820a54393fbf081f78bc102 #v2
         with:
           command: install
-          args: --version 1.7.0 --locked typeshare-cli
+          args: --version 1.11.0 --locked typeshare-cli
       - run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}

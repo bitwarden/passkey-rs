@@ -13,7 +13,8 @@ impl<I: Display> Display for CodeOutOfRange<I> {
 
 /// Generate an enum with associated values, plus conversion methods
 macro_rules! repr_enum {
-    ( $(#[$attr:meta])* $enum_name:ident: $repr:ident {$($(#[$fattr:meta])* $name:ident: $val:expr,)* } ) => {
+    ( $(#[$attr:meta])* $enum_name:ident: $repr:ident {$($(#[$fattr:meta])* $name:ident: $val:expr_2021,)* } ) => {
+        #[allow(clippy::allow_attributes, reason = "the macro doesn't always play nicely with expect()")]
         #[allow(non_camel_case_types)]
         $(#[$attr])*
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -33,7 +34,7 @@ macro_rules! repr_enum {
             }
         }
         impl From<$enum_name> for $repr {
-            #[allow(clippy::as_conversions)]
+            #[expect(clippy::as_conversions)]
             fn from(src: $enum_name) -> Self {
                 src as $repr
             }

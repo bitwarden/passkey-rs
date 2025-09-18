@@ -1,21 +1,21 @@
 use p256::SecretKey;
 use passkey_types::{
-    ctap2::{
-        make_credential::{Request, Response},
-        AttestedCredentialData, AuthenticatorData, Ctap2Error, StatusCode,
-    },
     Passkey,
+    ctap2::{
+        AttestedCredentialData, AuthenticatorData, Ctap2Error, Flags, StatusCode,
+        make_credential::{Request, Response},
+    },
 };
 
 use crate::{
-    user_validation::UIHint, Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod,
+    Authenticator, CoseKeyPair, CredentialStore, UserValidationMethod, user_validation::UIHint,
 };
 
 impl<S, U> Authenticator<S, U>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod<PasskeyItem = <S as CredentialStore>::PasskeyItem> + Sync,
-    Passkey: TryFrom<<S as CredentialStore>::PasskeyItem> + Clone,
+    // Passkey: TryFrom<<S as CredentialStore>::PasskeyItem> + Clone,
 {
     /// This method is invoked by the host to request generation of a new credential in the authenticator.
     pub async fn make_credential(&mut self, input: Request) -> Result<Response, StatusCode> {
@@ -36,7 +36,11 @@ where
         {
             if let Some(excluded_credential) = self
                 .store()
-                .find_credentials(input.exclude_list.as_deref(), &input.rp.id)
+                .find_credentials(
+                    input.exclude_list.as_deref(),
+                    &input.rp.id,
+                    Some(&input.user.id),
+                )
                 .await?
                 .first()
             {
@@ -46,7 +50,7 @@ where
                 )
                 .await?;
 
-                return Err(Ctap2Error::CredentialExcluded.into());
+                // return Err(Ctap2Error::CredentialExcluded.into());
             }
         }
 
@@ -74,7 +78,7 @@ where
         //    extension processing are returned in the authenticator data.
 
         // NB: We do not currently support any Pin Protocols (1 or 2) as this does not make sense
-        // in the context of 1Password. This is to be revisisted to see if we can hook this into
+        // in the context of 1Password. This is to be revisited to see if we can hook this into
         // using some key that we already have, such as the Biometry unlock key for example.
         // 5. If pinAuth parameter is present and pinProtocol is 1, verify it by matching it against
         //    first 16 bytes of HMAC-SHA-256 of clientDataHash parameter using
@@ -90,34 +94,6 @@ where
             return Err(Ctap2Error::UnsupportedOption.into());
         }
 
-        // 8. Moving step 8 to after step 9 so that the new credential can be displayed to the user
-
-        // 9. Generate a new credential key pair for the algorithm specified.
-        let credential_id: Vec<u8> = {
-            use rand::RngCore;
-            let mut data = vec![0u8; 16];
-            rand::thread_rng().fill_bytes(&mut data);
-            data
-        };
-
-        let private_key = {
-            let mut rng = rand::thread_rng();
-            SecretKey::random(&mut rng)
-        };
-
-        // Encoding of the keypair into their CoseKey representation before moving the private CoseKey
-        // into the passkey. Keeping the public key ready for step 11 below and returning the attested
-        // credential.
-        let CoseKeyPair { public, private } = CoseKeyPair::from_secret_key(&private_key, algorithm);
-
-        let passkey = Passkey {
-            key: private,
-            rp_id: input.rp.id.clone(),
-            credential_id: credential_id.into(),
-            user_handle: input.options.rk.then_some(input.user.id.clone()),
-            counter: self.make_credentials_with_signature_counter.then_some(0),
-        };
-
         // 8. If the authenticator has a display, show the items contained within the user and rp
         //    parameter structures to the user. Alternatively, request user interaction in an
         //    authenticator-specific way (e.g., flash the LED light). Request permission to create
@@ -129,6 +105,36 @@ where
                 &input.options,
             )
             .await?;
+
+        // 9. Generate a new credential key pair for the algorithm specified.
+        let credential_id = passkey_types::rand::random_vec(self.credential_id_length.into());
+
+        let private_key = {
+            let mut rng = rand::thread_rng();
+            SecretKey::random(&mut rng)
+        };
+
+        let extensions = self.make_extensions(input.extensions, flags.contains(Flags::UV))?;
+
+        // Encoding of the key pair into their CoseKey representation before moving the private CoseKey
+        // into the passkey. Keeping the public key ready for step 11 below and returning the attested
+        // credential.
+        let CoseKeyPair { public, private } = CoseKeyPair::from_secret_key(&private_key, algorithm);
+
+        let store_info = self.store.get_info().await;
+
+        let is_passkey_rk = store_info
+            .discoverability
+            .is_passkey_discoverable(input.options.rk);
+
+        let passkey = Passkey {
+            key: private,
+            rp_id: input.rp.id.clone(),
+            credential_id: credential_id.into(),
+            user_handle: is_passkey_rk.then_some(input.user.id.clone()),
+            counter: self.make_credentials_with_signature_counter.then_some(0),
+            extensions: extensions.credential,
+        };
 
         // 10. If "rk" in options parameter is set to true:
         //     1. If a credential for the same RP ID and account ID already exists on the
@@ -151,12 +157,16 @@ where
 
         let auth_data = AuthenticatorData::new(&input.rp.id, passkey.counter)
             .set_flags(flags)
-            .set_attested_credential_data(acd);
+            .set_attested_credential_data(acd)
+            .set_make_credential_extensions(extensions.signed)?;
 
         let response = Response {
-            auth_data,
             fmt: "None".into(),
-            att_stmt: vec![0xa0].into(), // CBOR exquivalent to empty map
+            auth_data,
+            att_stmt: coset::cbor::value::Value::Map(vec![]),
+            ep_att: None,
+            large_blob_key: None,
+            unsigned_extension_outputs: extensions.unsigned,
         };
 
         // 10
@@ -169,212 +179,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use coset::iana;
-    use passkey_types::{
-        ctap2::{
-            make_credential::{
-                Options, PublicKeyCredentialRpEntity, PublicKeyCredentialUserEntity,
-            },
-            Aaguid,
-        },
-        rand::random_vec,
-        webauthn, Bytes,
-    };
-
-    use tokio::sync::Mutex;
-
-    use super::*;
-    use crate::{
-        credential_store::{DiscoverabilitySupport, StoreInfo},
-        user_validation::{MockUIHint, MockUserValidationMethod},
-        MemoryStore,
-    };
-
-    fn good_request() -> Request {
-        Request {
-            client_data_hash: random_vec(32).into(),
-            rp: PublicKeyCredentialRpEntity {
-                id: "future.1password.com".into(),
-                name: Some("1password".into()),
-            },
-            user: webauthn::PublicKeyCredentialUserEntity {
-                id: random_vec(16).into(),
-                display_name: "wendy".into(),
-                name: "Appleseed".into(),
-            },
-            pub_key_cred_params: vec![webauthn::PublicKeyCredentialParameters {
-                ty: webauthn::PublicKeyCredentialType::PublicKey,
-                alg: iana::Algorithm::ES256,
-            }],
-            exclude_list: None,
-            extensions: None,
-            options: Options {
-                rk: true,
-                up: true,
-                uv: true,
-            },
-            pin_auth: None,
-            pin_protocol: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn assert_storage_on_success() {
-        let request = good_request();
-        let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user_with_hint(
-            1,
-            MockUIHint::RequestNewCredential(request.user.clone().into(), request.rp.clone()),
-        );
-
-        let mut authenticator =
-            Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
-
-        authenticator
-            .make_credential(request)
-            .await
-            .expect("error happened while trying to make a new credential");
-
-        let store = shared_store.lock().await;
-
-        assert_eq!(store.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn assert_excluded_credentials() {
-        let cred_id: Bytes = random_vec(16).into();
-        let response = Request {
-            exclude_list: Some(vec![webauthn::PublicKeyCredentialDescriptor {
-                ty: webauthn::PublicKeyCredentialType::PublicKey,
-                id: cred_id.clone(),
-                transports: Some(vec![webauthn::AuthenticatorTransport::Usb]),
-            }]),
-            ..good_request()
-        };
-        let passkey = Passkey {
-            // contents of key doesn't matter, only the id
-            key: Default::default(),
-            rp_id: "".into(),
-            credential_id: cred_id.clone(),
-            user_handle: Some(response.user.id.clone()),
-            counter: None,
-        };
-        let shared_store = Arc::new(Mutex::new(MemoryStore::new()));
-        let user_mock = MockUserValidationMethod::verified_user_with_hint(
-            1,
-            MockUIHint::InformExcludedCredentialFound(passkey.clone()),
-        );
-
-        shared_store.lock().await.insert(cred_id.into(), passkey);
-
-        let mut authenticator =
-            Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
-
-        let err = authenticator
-            .make_credential(response)
-            .await
-            .expect_err("make credential succeded even though store contains excluded id");
-
-        assert_eq!(err, Ctap2Error::CredentialExcluded.into());
-        assert_eq!(shared_store.lock().await.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn assert_unsupported_algorithm() {
-        let user_mock = MockUserValidationMethod::verified_user(0);
-        let mut authenticator =
-            Authenticator::new(Aaguid::new_empty(), MemoryStore::new(), user_mock);
-
-        let request = Request {
-            pub_key_cred_params: vec![webauthn::PublicKeyCredentialParameters {
-                ty: webauthn::PublicKeyCredentialType::PublicKey,
-                alg: iana::Algorithm::RSAES_OAEP_SHA_256,
-            }],
-            ..good_request()
-        };
-
-        let err = authenticator
-            .make_credential(request)
-            .await
-            .expect_err("Succeeded with an unsupported algorithm");
-
-        assert_eq!(err, Ctap2Error::UnsupportedAlgorithm.into());
-    }
-
-    #[tokio::test]
-    async fn make_credential_counter_is_some_0_when_counters_are_enabled() {
-        // Arrange
-        let shared_store = Arc::new(Mutex::new(None));
-        let user_mock = MockUserValidationMethod::verified_user(1);
-        let request = good_request();
-        let mut authenticator =
-            Authenticator::new(Aaguid::new_empty(), shared_store.clone(), user_mock);
-        authenticator.set_make_credentials_with_signature_counter(true);
-
-        // Act
-        authenticator.make_credential(request).await.unwrap();
-
-        // Assert
-        let store = shared_store.lock().await;
-        assert_eq!(store.as_ref().and_then(|c| c.counter).unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn make_credential_returns_err_when_rk_is_requested_but_not_supported() {
-        struct StoreWithoutDiscoverableSupport;
-        #[async_trait::async_trait]
-        impl CredentialStore for StoreWithoutDiscoverableSupport {
-            type PasskeyItem = Passkey;
-
-            async fn find_credentials(
-                &self,
-                _id: Option<&[webauthn::PublicKeyCredentialDescriptor]>,
-                _rp_id: &str,
-            ) -> Result<Vec<Self::PasskeyItem>, StatusCode> {
-                #![allow(clippy::unimplemented)]
-                unimplemented!("The test should not call find_credentials")
-            }
-
-            async fn save_credential(
-                &mut self,
-                _cred: Passkey,
-                _user: PublicKeyCredentialUserEntity,
-                _rp: PublicKeyCredentialRpEntity,
-                _options: Options,
-            ) -> Result<(), StatusCode> {
-                #![allow(clippy::unimplemented)]
-                unimplemented!("The test should not call save_credential")
-            }
-
-            async fn update_credential(&mut self, _cred: Passkey) -> Result<(), StatusCode> {
-                #![allow(clippy::unimplemented)]
-                unimplemented!("The test should not call update_credential")
-            }
-
-            async fn get_info(&self) -> StoreInfo {
-                StoreInfo {
-                    discoverability: DiscoverabilitySupport::OnlyNonDiscoverable,
-                }
-            }
-        }
-
-        // Arrange
-        let store = StoreWithoutDiscoverableSupport;
-        let user_mock = MockUserValidationMethod::verified_user(0);
-        let request = good_request();
-        let mut authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        authenticator.set_make_credentials_with_signature_counter(true);
-
-        // Act
-        let err = authenticator
-            .make_credential(request)
-            .await
-            .expect_err("Succeeded with unsupported rk");
-
-        // Assert
-        assert_eq!(err, Ctap2Error::UnsupportedOption.into());
-    }
-}
+mod tests;

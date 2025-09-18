@@ -4,11 +4,67 @@ use passkey_types::{
     webauthn,
 };
 
-use crate::{user_validation, CredentialStore, UserValidationMethod};
+use crate::{CredentialStore, UserValidationMethod, user_validation};
 
+pub mod extensions;
 mod get_assertion;
 mod get_info;
 mod make_credential;
+
+use extensions::Extensions;
+
+/// The length of credentialId that should be randomly generated during a credential creation operation.
+///
+/// The value has a maximum of `64` per the [webauthn specification]. The minimum is a library enforced as `16`.
+///
+/// It is recommended to randomize this if possible to avoid authenticator fingerprinting.
+///
+/// [webauthn specification]: https://www.w3.org/TR/webauthn-3/#user-handle
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct CredentialIdLength(u8);
+
+impl CredentialIdLength {
+    /// The default length of a credentialId to generate.
+    ///
+    /// This value is the same as [`Self::default`], but available in
+    /// `const` contexts.
+    pub const DEFAULT: Self = Self(Self::MIN);
+
+    const MIN: u8 = 16;
+
+    // "A user handle is an opaque byte sequence with a maximum size of 64 bytes..."
+    // Ref: https://www.w3.org/TR/webauthn-3/#user-handle
+    const MAX: u8 = 64;
+
+    /// Generates and returns a uniformly random [CredentialIdLength].
+    pub fn randomized(rng: &mut impl rand::Rng) -> Self {
+        let length = rng.gen_range(Self::MIN..=Self::MAX);
+        Self(length)
+    }
+}
+
+impl Default for CredentialIdLength {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl From<u8> for CredentialIdLength {
+    fn from(value: u8) -> Self {
+        // Clamp to the specification's maximum.
+        let value = core::cmp::min(Self::MAX, value);
+        // Round values less then what we support up to the default.
+        let value = core::cmp::max(Self::MIN, value);
+        Self(value)
+    }
+}
+
+impl From<CredentialIdLength> for usize {
+    fn from(value: CredentialIdLength) -> Self {
+        usize::from(value.0)
+    }
+}
 
 /// A virtual authenticator with all the necessary state and information.
 pub struct Authenticator<S, U> {
@@ -20,13 +76,11 @@ pub struct Authenticator<S, U> {
     algs: Vec<iana::Algorithm>,
     /// Current supported transports that this authenticator can use to communicate.
     ///
-    /// Default values are [`AuthenticatorTransport::Internal`] and [`AuthenticatorTransport::Hybrid`].
+    /// Default values are [`webauthn::AuthenticatorTransport::Internal`] and
+    /// [`webauthn::AuthenticatorTransport::Hybrid`].
     transports: Vec<webauthn::AuthenticatorTransport>,
     /// Provider of user verification factor.
     user_validation: U,
-
-    /// The display name given when a [`webauthn::CredentialPropertiesOutput`] is requested
-    display_name: Option<String>,
 
     /// Value to control whether the authenticator will save new credentials with a signature counter.
     /// The default value is `false`.
@@ -34,6 +88,12 @@ pub struct Authenticator<S, U> {
     /// NOTE: Using a counter with a credential that will sync is not recommended and can cause friction
     /// with the distributed nature of synced keys. It can also cause issues with backup and restore functionality.
     make_credentials_with_signature_counter: bool,
+
+    /// The length of the credentialId made during a creation operation.
+    credential_id_length: CredentialIdLength,
+
+    /// Supported authenticator extensions
+    extensions: Extensions,
 }
 
 impl<S, U> Authenticator<S, U>
@@ -53,19 +113,10 @@ where
                 webauthn::AuthenticatorTransport::Hybrid,
             ],
             user_validation: user,
-            display_name: None,
             make_credentials_with_signature_counter: false,
+            credential_id_length: CredentialIdLength::default(),
+            extensions: Extensions::default(),
         }
-    }
-
-    /// Set the authenticator's display name which will be returned if [`webauthn::CredentialPropertiesOutput`] is requested.
-    pub fn set_display_name(&mut self, name: String) {
-        self.display_name = Some(name);
-    }
-
-    /// Get a reference to the authenticators display name to return in [`webauthn::CredentialPropertiesOutput`].
-    pub fn display_name(&self) -> Option<&String> {
-        self.display_name.as_ref()
     }
 
     /// Set whether the authenticator should save new credentials with a signature counter.
@@ -79,6 +130,16 @@ where
     /// Get whether the authenticator will save new credentials with a signature counter.
     pub fn make_credentials_with_signature_counter(&self) -> bool {
         self.make_credentials_with_signature_counter
+    }
+
+    /// Set the length of credentialId to generate when creating a new credential.
+    pub fn set_make_credential_id_length(&mut self, length: CredentialIdLength) {
+        self.credential_id_length = length;
+    }
+
+    /// Get the current length of credential that will be generated when making a new credential.
+    pub fn make_credential_id_length(&self) -> CredentialIdLength {
+        self.credential_id_length
     }
 
     /// Access the [`CredentialStore`] to look into what is stored.
@@ -171,282 +232,13 @@ where
 
         Ok(flags)
     }
+
+    /// Set the hmac-secret extension as a supported extension
+    pub fn hmac_secret(mut self, ext: extensions::HmacSecretConfig) -> Self {
+        self.extensions.hmac_secret = Some(ext);
+        self
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use passkey_types::ctap2::{Aaguid, Flags};
-
-    use crate::{user_validation::UIHint, Authenticator, MockUserValidationMethod, UserCheck};
-
-    #[tokio::test]
-    async fn check_user_does_not_check_up_or_uv_when_not_requested() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(false),
-                mockall::predicate::eq(false),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: false,
-                    verification: false,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: false,
-            uv: false,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await
-            .unwrap();
-
-        // Assert
-        assert_eq!(result, Flags::empty());
-    }
-
-    #[tokio::test]
-    async fn check_user_checks_up_when_requested() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(false),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: true,
-                    verification: false,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: true,
-            uv: false,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await
-            .unwrap();
-
-        // Assert
-        assert_eq!(result, Flags::UP);
-    }
-
-    #[tokio::test]
-    async fn check_user_checks_uv_when_requested() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_is_verification_enabled()
-            .returning(|| Some(true));
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(true),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: true,
-                    verification: true,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: true,
-            uv: true,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await
-            .unwrap();
-
-        // Assert
-        assert_eq!(result, Flags::UP | Flags::UV);
-    }
-
-    #[tokio::test]
-    async fn check_user_returns_operation_denied_when_up_was_requested_but_not_returned() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(false),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: false,
-                    verification: false,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: true,
-            uv: false,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await;
-
-        // Assert
-        assert_eq!(
-            result,
-            Err(passkey_types::ctap2::Ctap2Error::OperationDenied)
-        );
-    }
-
-    #[tokio::test]
-    async fn check_user_returns_operation_denied_when_uv_was_requested_but_not_returned() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_is_verification_enabled()
-            .returning(|| Some(true));
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(true),
-                mockall::predicate::eq(true),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: true,
-                    verification: false,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: true,
-            uv: true,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await;
-
-        // Assert
-        assert_eq!(
-            result,
-            Err(passkey_types::ctap2::Ctap2Error::OperationDenied)
-        );
-    }
-
-    #[tokio::test]
-    async fn check_user_returns_unsupported_option_when_uv_was_requested_but_is_not_supported() {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_is_verification_enabled()
-            .returning(|| None);
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: true,
-            uv: true,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await;
-
-        // Assert
-        assert_eq!(
-            result,
-            Err(passkey_types::ctap2::Ctap2Error::UnsupportedOption)
-        );
-    }
-
-    #[tokio::test]
-    async fn check_user_returns_up_and_uv_flags_when_neither_up_or_uv_was_requested_but_performed_anyways(
-    ) {
-        // Arrange & Assert
-        let mut user_mock = MockUserValidationMethod::new();
-        user_mock
-            .expect_is_verification_enabled()
-            .returning(|| Some(true));
-        user_mock
-            .expect_check_user()
-            .with(
-                mockall::predicate::always(),
-                mockall::predicate::eq(false),
-                mockall::predicate::eq(false),
-            )
-            .returning(|_, _, _| {
-                Ok(UserCheck {
-                    presence: true,
-                    verification: true,
-                })
-            })
-            .once();
-
-        // Arrange
-        let store = None;
-        let authenticator = Authenticator::new(Aaguid::new_empty(), store, user_mock);
-        let options = passkey_types::ctap2::make_credential::Options {
-            up: false,
-            uv: false,
-            ..Default::default()
-        };
-
-        // Act
-        let result = authenticator
-            .check_user(UIHint::InformNoCredentialsFound, &options)
-            .await
-            .unwrap();
-
-        // Assert
-        assert_eq!(result, Flags::UP | Flags::UV);
-    }
-}
+mod tests;

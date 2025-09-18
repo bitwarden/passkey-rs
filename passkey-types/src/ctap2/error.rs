@@ -160,7 +160,7 @@ repr_enum! {
         UserActionTimeout : 0x2F,
         /// Continuation command, such as, authenticatorGetNextAssertion[^1] not allowed.
         ///
-        /// [^1]: Comming soon to an MR near you
+        /// [^1]: Coming soon to an MR near you
         NotAllowed : 0x30,
         /// PIN Invalid.
         PinInvalid : 0x31,
@@ -192,7 +192,7 @@ repr_enum! {
         /// [Built-in user verification][1] is disabled.
         ///
         /// [1]: https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-errata-20220621.html#built-in-user-verification-method
-        UserVerficationBlocked : 0x3C,
+        UserVerificationBlocked : 0x3C,
         /// A checksum did not match.
         IntegrityFailure : 0x3D,
         /// The requested subcommand is either invalid or not implemented.
@@ -328,43 +328,4 @@ impl From<VendorError> for StatusCode {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::ctap2::error::{ExtensionError, U2FError, UnknownSpecError, VendorError};
-
-    use super::{Ctap2Error, StatusCode};
-
-    #[test]
-    fn from_byte_conversions() {
-        // Assert success defaults to ctap2
-        let success = StatusCode::from(0x00);
-        assert_eq!(success, Ctap2Error::Ok.into());
-
-        let invalid_len = StatusCode::from(0x03);
-        assert_eq!(invalid_len, U2FError::InvalidLength.into());
-
-        let unsupported_alg = StatusCode::from(0x26);
-        assert_eq!(unsupported_alg, Ctap2Error::UnsupportedAlgorithm.into());
-
-        let unknown = StatusCode::from(0x1B);
-        assert_eq!(unknown, UnknownSpecError(0x1B).into());
-
-        let first_extension_err = StatusCode::from(0xE0);
-        assert_eq!(first_extension_err, ExtensionError(0xE0).into());
-        let last_extension_err = StatusCode::from(0xEF);
-        assert_eq!(last_extension_err, ExtensionError(0xEF).into());
-
-        let first_vendor_err = StatusCode::from(0xF0);
-        assert_eq!(first_vendor_err, VendorError(0xF0).into());
-        let last_vendor_err = StatusCode::from(0xFF);
-        assert_eq!(last_vendor_err, VendorError(0xFF).into());
-    }
-
-    #[test]
-    fn all_byte_values() {
-        // iterate through all byte values, it should not panic. Iterating through 256 cases should
-        // be fairly quick
-        for i in u8::MIN..=u8::MAX {
-            let _code = StatusCode::from(i);
-        }
-    }
-}
+mod tests;

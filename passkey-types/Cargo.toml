@@ -1,15 +1,15 @@
 [package]
-name = "passkey-types"
-description = "Rust type definitions for the webauthn and CTAP specifications"
-include = ["src/", "../LICENSE-APACHE", "../LICENSE-MIT"]
-readme = "README.md"
-version = "0.2.1"
 authors.workspace = true
-repository.workspace = true
-edition.workspace = true
-license.workspace = true
-keywords.workspace = true
 categories.workspace = true
+description = "Rust type definitions for the webauthn and CTAP specifications"
+edition.workspace = true
+include = ["../LICENSE-APACHE", "../LICENSE-MIT", "src/"]
+keywords.workspace = true
+license.workspace = true
+name = "passkey-types"
+readme = "README.md"
+repository.workspace = true
+version = "0.5.0"
 
 [lints]
 workspace = true
@@ -17,21 +17,30 @@ workspace = true
 [features]
 default = []
 serialize_bytes_as_base64_string = []
+testable = ["dep:p256"]
 typeshare = ["dep:typeshare"]
 
 [dependencies]
 bitflags = "2"
 ciborium = "0.2"
+# TODO: investigate rolling our own IANA listings and COSE keys
+coset = "0.3"
 data-encoding = "2"
+hmac = "0.12"
 indexmap = { version = "2", features = ["serde"] }
+p256 = { version = "0.13", features = [
+  "arithmetic",
+  "jwk",
+  "pem",
+], optional = true }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 strum = { version = "0.25", features = ["derive"] }
 typeshare = { version = "1", optional = true }
-# TODO: investigate rolling our own IANA listings and COSE keys
-coset = "0.3"
+url = { version = "2", features = ["serde"] }
+zeroize = { version = "1", features = ["zeroize_derive"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
