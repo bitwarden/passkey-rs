@@ -8,59 +8,90 @@ on:
 
 name: CI
 
+permissions: {}
+
 jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     strategy:
       matrix:
         rust:
           - 1.81.0
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           components: clippy
-      - run: rustup run ${{ matrix.rust }} cargo clippy --all --all-targets --all-features -- -D warnings
+
+      - name: Run Clippy
+        run: rustup run ${{ matrix.rust }} cargo clippy --all --all-targets --all-features -- -D warnings
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     strategy:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
           - 1.81.0
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           components: rustfmt
-      - run: rustup run ${{ matrix.rust}} cargo fmt --all -- --check
+
+      - name: Run Rustfmt
+        run: rustup run ${{ matrix.rust}} cargo fmt --all -- --check
 
   test:
     name: Test
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     strategy:
       matrix:
         rust:
           # Once we settle on a MSRV we should add that here.
           - 1.81.0
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
-      - uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af #v1
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
-      - run: rustup run ${{ matrix.rust }} cargo test --all-features
+
+      - name: Run tests
+        run: rustup run ${{ matrix.rust }} cargo test --all-features
 
   typeshare:
     name: Typeshare
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
     strategy:
       matrix:
         rust:
@@ -77,12 +108,21 @@ jobs:
           - fs: swift
             lang: swift
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 #v4
-      - uses: actions-rust-lang/setup-rust-toolchain@1fbea72663f6d4c03efaab13560c8a24cfd2a7cc #v1
+      - name: Check out repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1.15.1
         with:
           toolchain: ${{ matrix.rust }}
-      - uses: clechasseur/rs-cargo@34eb9ee3e4186e5c7820a54393fbf081f78bc102 #v2
+
+      - name: Install Typeshare
+        uses: clechasseur/rs-cargo@bbcc0f43bb19de578aed0eaf1211970155d0fbcd # v4.0.0
         with:
           command: install
           args: --version 1.7.0 --locked typeshare-cli
-      - run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}
+
+      - name: Run Typeshare
+        run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}
