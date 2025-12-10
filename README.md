@@ -4,6 +4,7 @@
 |  ------  | ----------- | ----------- |
 | 4916109c | [1Password/passkey-rs#81](https://github.com/1Password/passkey-rs/pull/81)            | Fix and enforce 1.85.1 MSRV |
 | 73554336 | [1Password/passkey-rs#68](https://github.com/1Password/passkey-rs/pull/68)            | Make typeshare an optional dependency. |
+| 02accbf1 | none                                                                                  | Pin Rust, Actions and OS runner versions in CI. |
 
 # Passkey-rs by 1Password
 
