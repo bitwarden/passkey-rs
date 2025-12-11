@@ -1,3 +1,8 @@
+# Fork differences
+
+|  commit  | Upstream PR | description |
+|  ------  | ----------- | ----------- |
+| 4916109c | [1Password/passkey-rs#81](https://github.com/1Password/passkey-rs/pull/81)            | Fix and enforce 1.85.1 MSRV |
 # Passkey-rs by 1Password
 
 [![github]](https://github.com/1Password/passkey-rs/tree/main/passkey/)
