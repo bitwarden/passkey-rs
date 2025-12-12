@@ -293,7 +293,8 @@ pub struct PublicKeyCredentialParameters {
     /// >       because it will be serialized into a message to the authenticator, which may be
     /// >       sent over a low-bandwidth link.
     #[serde(with = "i64_to_iana")]
-    #[typeshare(serialized_as = "I54")] // because i64 fails for js
+    #[cfg_attr(feature = "typeshare", typeshare(serialized_as = "I54"))]
+    // because i64 fails for js
     pub alg: iana::Algorithm,
 
     #[cfg(not(feature = "typeshare"))]
@@ -549,7 +550,8 @@ pub struct AuthenticatorAttestationResponse {
     /// This is the [CoseAlgorithmIdentifier] of the new credential
     ///
     /// [CoseAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
-    #[typeshare(serialized_as = "I54")] // because i64 fails for js
+    #[cfg_attr(feature = "typeshare", typeshare(serialized_as = "I54"))]
+    // ^ because i64 fails for js
     pub public_key_algorithm: i64,
 
     #[cfg(not(feature = "typeshare"))]
