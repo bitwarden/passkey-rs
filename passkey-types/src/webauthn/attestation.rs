@@ -284,7 +284,6 @@ pub struct PublicKeyCredentialParameters {
     #[serde(rename = "type", deserialize_with = "ignore_unknown")]
     pub ty: PublicKeyCredentialType,
 
-    #[cfg(feature = "typeshare")]
     /// This member specifies the cryptographic signature algorithm with which the newly generated
     /// credential will be used, and thus also the type of asymmetric key pair to be generated,
     /// e.g., RSA or Elliptic Curve.
@@ -295,17 +294,6 @@ pub struct PublicKeyCredentialParameters {
     #[serde(with = "i64_to_iana")]
     #[cfg_attr(feature = "typeshare", typeshare(serialized_as = "I54"))]
     // because i64 fails for js
-    pub alg: iana::Algorithm,
-
-    #[cfg(not(feature = "typeshare"))]
-    /// This member specifies the cryptographic signature algorithm with which the newly generated
-    /// credential will be used, and thus also the type of asymmetric key pair to be generated,
-    /// e.g., RSA or Elliptic Curve.
-    ///
-    /// > Note: we use `alg` as the latter member name, rather than spelling-out `algorithm`,
-    /// >       because it will be serialized into a message to the authenticator, which may be
-    /// >       sent over a low-bandwidth link.
-    #[serde(with = "i64_to_iana")]
     pub alg: iana::Algorithm,
 }
 
@@ -546,18 +534,11 @@ pub struct AuthenticatorAttestationResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_key: Option<Bytes>,
 
-    #[cfg(feature = "typeshare")]
     /// This is the [CoseAlgorithmIdentifier] of the new credential
     ///
     /// [CoseAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
     #[cfg_attr(feature = "typeshare", typeshare(serialized_as = "I54"))]
     // ^ because i64 fails for js
-    pub public_key_algorithm: i64,
-
-    #[cfg(not(feature = "typeshare"))]
-    /// This is the [CoseAlgorithmIdentifier] of the new credential
-    ///
-    /// [CoseAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
     pub public_key_algorithm: i64,
 
     /// This attribute contains an attestation object, which is opaque to, and cryptographically
