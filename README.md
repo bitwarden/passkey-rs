@@ -239,3 +239,4 @@ be dual licensed as above, without any additional terms or conditions.
 [ctap-2]: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html
 [public-suffix]: https://publicsuffix.org/
 [ctap-hid]: https://fidoalliance.org/specs/fido-v2.0-id-20180227/fido-client-to-authenticator-protocol-v2.0-id-20180227.html#usb
+
