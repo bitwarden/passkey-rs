@@ -83,7 +83,6 @@ where
     Ok(de
         .deserialize_seq(IgnoreUnknown(std::marker::PhantomData))
         .unwrap_or_default())
-    // de.deserialize_seq(IgnoreUnknown(std::marker::PhantomData))
 }
 
 pub(crate) fn ignore_unknown_vec<'de, D, T>(de: D) -> Result<Vec<T>, D::Error>
@@ -96,10 +95,7 @@ where
 }
 
 pub mod i64_to_iana {
-    use super::StringOrNum;
-    use std::marker::PhantomData;
-
-    use coset::iana::EnumI64;
+    use passkey_crypto::iana::EnumI64;
 
     pub fn serialize<S, T>(value: &T, ser: S) -> Result<S::Ok, S::Error>
     where
@@ -107,21 +103,6 @@ pub mod i64_to_iana {
         T: EnumI64,
     {
         ser.serialize_i64(value.to_i64())
-    }
-
-    pub fn deserialize<'de, D, T>(de: D) -> Result<T, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-        T: EnumI64,
-    {
-        let value: i64 = de.deserialize_any(StringOrNum(PhantomData))?;
-
-        T::from_i64(value).ok_or_else(|| {
-            <D::Error as serde::de::Error>::invalid_value(
-                serde::de::Unexpected::Signed(value),
-                &"An iana::Algorithm value",
-            )
-        })
     }
 }
 
@@ -141,15 +122,12 @@ where
     where
         E: Error,
     {
-        match FromStr::from_str(v) {
-            Ok(v) => Ok(v),
-            _ => {
-                if let Ok(v) = f64::from_str(v) {
-                    self.visit_f64(v)
-                } else {
-                    Err(E::custom("Was not a stringified number"))
-                }
-            }
+        if let Ok(v) = FromStr::from_str(v) {
+            Ok(v)
+        } else if let Ok(v) = f64::from_str(v) {
+            self.visit_f64(v)
+        } else {
+            Err(E::custom("Was not a stringified number"))
         }
     }
 
@@ -242,6 +220,17 @@ where
         .map(Some)
 }
 
+/// Deserializes an i64 that may be stringified (e.g., "-7" instead of -7).
+/// Returns `Ok(None)` if parsing fails, allowing the caller to handle unknown values gracefully.
+pub(crate) fn maybe_stringified_i64<'de, D>(de: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(de
+        .deserialize_any(StringOrNum(std::marker::PhantomData))
+        .ok())
+}
+
 struct StringOrBool;
 
 impl Visitor<'_> for StringOrBool {
@@ -279,5 +268,6 @@ where
 {
     de.deserialize_any(StringOrBool)
 }
+
 #[cfg(test)]
 mod tests;

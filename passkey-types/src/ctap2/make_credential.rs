@@ -1,13 +1,21 @@
 //! <https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticatorMakeCredential>
 
-use ciborium::{Value, cbor};
+use ciborium::cbor;
 use serde::{Deserialize, Serialize};
 
-use crate::{Bytes, ctap2::AuthenticatorData, webauthn};
+use crate::{
+    Bytes,
+    ctap2::AuthenticatorData,
+    utils::serde::{ignore_unknown_opt_vec, ignore_unknown_vec},
+    webauthn,
+};
 
 #[cfg(doc)]
-use crate::webauthn::{
-    CollectedClientData, PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor,
+use {
+    crate::webauthn::{
+        CollectedClientData, PublicKeyCredentialCreationOptions, PublicKeyCredentialDescriptor,
+    },
+    ciborium::value::Value,
 };
 
 use super::extensions::{AuthenticatorPrfInputs, AuthenticatorPrfMakeOutputs, HmacGetSecretInput};
@@ -15,7 +23,7 @@ use super::extensions::{AuthenticatorPrfInputs, AuthenticatorPrfMakeOutputs, Hma
 serde_workaround! {
     /// While similar in structure to [`PublicKeyCredentialCreationOptions`],
     /// it is not completely identical, namely the presence of the `options` key.
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq)]
     pub struct Request {
         /// Hash of the ClientData contextual binding specified by host.
         #[serde(rename = 0x01)]
@@ -53,36 +61,41 @@ serde_workaround! {
         /// A sequence of CBOR maps consisting of pairs of PublicKeyCredentialType (a string) and
         /// cryptographic algorithm (a positive or negative integer), where algorithm identifiers
         /// are values that SHOULD be registered in the IANA COSE Algorithms registry
-        /// [`coset::iana::Algorithm`]. This sequence is ordered from most preferred (by the RP) to least
+        /// [`passkey_crypto::iana::Algorithm`]. This sequence is ordered from most preferred (by the RP) to least
         /// preferred.
-        #[serde(rename = 0x04)]
+        #[serde(rename = 0x04, deserialize_with = ignore_unknown_vec)]
         pub pub_key_cred_params: Vec<webauthn::PublicKeyCredentialParameters>,
 
         /// A sequence of [`PublicKeyCredentialDescriptor`] structures, as specified in [`webauthn`].
         /// The authenticator returns an error if the authenticator already contains one of
         /// the credentials enumerated in this sequence. This allows RPs to limit the creation of
         /// multiple credentials for the same account on a single authenticator.
-        #[serde(rename = 0x05, default, skip_serializing_if = Option::is_none)]
+        #[serde(
+            rename = 0x05;
+            default,
+            skip_serializing_if = Option::is_none,
+            deserialize_with = ignore_unknown_opt_vec
+        )]
         pub exclude_list: Option<Vec<webauthn::PublicKeyCredentialDescriptor>>,
 
         /// Parameters to influence authenticator operation, as specified in [`webauthn`].
         /// These parameters might be authenticator specific.
-        #[serde(rename = 0x06, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x06; default, skip_serializing_if = Option::is_none)]
         pub extensions: Option<ExtensionInputs>,
 
         /// Parameters to influence authenticator operation, see [`Options`] for more details.
-        #[serde(rename = 0x07, default)]
+        #[serde(rename = 0x07; default)]
         pub options: Options,
 
         /// First 16 bytes of HMAC-SHA-256 of clientDataHash using pinToken which platform got from
         /// the authenticator: HMAC-SHA-256(pinToken, clientDataHash). (NOT YET SUPPORTED)
-        #[serde(rename = 0x08, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x08; default, skip_serializing_if = Option::is_none)]
         pub pin_auth: Option<Bytes>,
 
         /// PIN protocol version chosen by the client
         ///
         /// if ever we hit more than 256 protocol versions, an enhacement request should be filed.
-        #[serde(rename = 0x09, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x09; default, skip_serializing_if = Option::is_none)]
         pub pin_protocol: Option<u8>,
     }
 }
@@ -93,7 +106,7 @@ serde_workaround! {
 ///
 /// [WebAuthn]: https://w3c.github.io/webauthn/#dictdef-publickeycredentialrpentity
 /// [CTAP2]: https://fidoalliance.org/specs/fido-v2.0-ps-20190130/fido-client-to-authenticator-protocol-v2.0-ps-20190130.html#authenticatorMakeCredential
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKeyCredentialRpEntity {
     /// The domain of the relying party
     pub id: String,
@@ -103,7 +116,12 @@ pub struct PublicKeyCredentialRpEntity {
 }
 
 /// This is a copy of [`webauthn::PublicKeyCredentialUserEntity`] with differing optional fields.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// Field names match the CTAP2 wire format (`displayName`, `icon`) rather than the WebAuthn JSON
+/// names, so this type can be used to decode `authenticatorGetAssertion` responses where the
+/// authenticator may legally omit anything beyond `id`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicKeyCredentialUserEntity {
     /// The ID of the user
     pub id: Bytes,
@@ -113,8 +131,9 @@ pub struct PublicKeyCredentialUserEntity {
     /// Optional display name
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// Optional URL pointing to a user icon
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Optional URL pointing to a user icon.
+    /// CTAP2 calls this field `icon`, not `iconUrl`.
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "icon")]
     pub icon_url: Option<String>,
 }
 
@@ -172,14 +191,17 @@ impl TryFrom<webauthn::PublicKeyCredentialRpEntity> for PublicKeyCredentialRpEnt
     }
 }
 
-/// The options that control how an authenticator will behave.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// The options that control how an authenticator will behave during authenticatorMakeCredential.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Options {
     /// Specifies whether this credential is to be discoverable or not.
     #[serde(default)]
     pub rk: bool,
     /// Instructs the authenticator to require a gesture that verifies the user to complete the request. Examples of such gestures are fingerprint scan or a PIN.
-    #[serde(default = "default_true")]
+    /// This is marked with `skip_serializing` because CTAP 2.0 does not specify a `up` field in
+    /// `Options`, while CTAP 2.1 allows the `up` field to be present but requires that its value
+    /// be set to true if it is present.
+    #[serde(default = "default_true", skip_serializing_if = "is_false")]
     pub up: bool,
     /// User Verification:
     ///
@@ -202,8 +224,12 @@ const fn default_true() -> bool {
     true
 }
 
+const fn is_false(e: &bool) -> bool {
+    !*e
+}
+
 /// All supported Authenticator extensions inputs during credential creation
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
 pub struct ExtensionInputs {
     /// A boolean value to indicate that this extension is requested by the Relying Party
     ///
@@ -270,26 +296,26 @@ serde_workaround! {
         // TODO: Change to a flattened enum when `content, type` serde enums can use numbers as
         // the keys
         #[serde(rename = 0x03)]
-        pub att_stmt: Value,
+        pub att_stmt: ciborium::value::Value,
 
         /// Indicates whether an enterprise attestation was returned for this credential.
         /// If `ep_att` is absent or present and set to false, then an enterprise attestation was not returned.
         /// If `ep_att` is present and set to true, then an enterprise attestation was returned.
         ///
         /// Enterprise attestation is currently unsupported by this library.
-        #[serde(rename = 0x04, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x04; default, skip_serializing_if = Option::is_none)]
         pub ep_att: Option<bool>,
 
         /// Contains the `largeBlobKey` for the credential, if requested with the `largeBlobKey` extension.
         ///
         /// The `largeBlobKey` extension is currently unsupported by this library.
-        #[serde(rename = 0x05, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x05; default, skip_serializing_if = Option::is_none)]
         pub large_blob_key: Option<Bytes>,
 
         /// A map, keyed by extension identifiers, to unsigned outputs of extensions, if any.
         /// Authenticators SHOULD omit this field if no processed extensions define unsigned outputs.
         /// Clients MUST treat an empty map the same as an omitted field.
-        #[serde(rename = 0x06, default, skip_serializing_if = Option::is_none)]
+        #[serde(rename = 0x06; default, skip_serializing_if = Option::is_none)]
         pub unsigned_extension_outputs: Option<UnsignedExtensionOutputs>,
     }
 }
@@ -313,7 +339,7 @@ impl Response {
                "fmt" => "none",
                 "attStmt" => {},
                 // Explicitly define these fields as bytes since specialization is still fairly far
-               "authData" => Value::Bytes(self.auth_data.to_vec()),
+               "authData" => ciborium::value::Value::Bytes(self.auth_data.to_vec()),
         })
         .unwrap();
         ciborium::ser::into_writer(&attestation_object_value, &mut attestation_object).unwrap();

@@ -3,9 +3,8 @@ use crate::rp_id_verifier::tests::TestFetcher;
 use super::*;
 use coset::iana;
 use passkey_authenticator::{MemoryStore, MockUserValidationMethod, UserCheck};
-use passkey_types::{
-    Bytes, ctap2, encoding::try_from_base64url, rand::random_vec, webauthn::CollectedClientData,
-};
+use passkey_crypto::{AvailableBackend, AvailableRng, AvailableSha2, rng::RngBackend};
+use passkey_types::{Bytes, ctap2, encoding::try_from_base64url, webauthn::CollectedClientData};
 use serde::Deserialize;
 use url::{ParseError, Url};
 
@@ -18,11 +17,11 @@ fn good_credential_creation_options() -> webauthn::PublicKeyCredentialCreationOp
             name: "future.1password.com".into(),
         },
         user: webauthn::PublicKeyCredentialUserEntity {
-            id: random_vec(16).into(),
+            id: AvailableRng::random_vec(16).into(),
             display_name: "wendy".into(),
             name: "wendy".into(),
         },
-        challenge: random_vec(32).into(),
+        challenge: AvailableRng::random_vec(32).into(),
         pub_key_cred_params: vec![webauthn::PublicKeyCredentialParameters {
             ty: webauthn::PublicKeyCredentialType::PublicKey,
             alg: iana::Algorithm::ES256,
@@ -41,7 +40,7 @@ fn good_credential_request_options(
     credential_id: impl Into<Bytes>,
 ) -> webauthn::PublicKeyCredentialRequestOptions {
     webauthn::PublicKeyCredentialRequestOptions {
-        challenge: random_vec(32).into(),
+        challenge: AvailableRng::random_vec(32).into(),
         timeout: None,
         rp_id: Some("future.1password.com".into()),
         allow_credentials: Some(vec![webauthn::PublicKeyCredentialDescriptor {
@@ -86,6 +85,7 @@ async fn create_and_authenticate() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
 
@@ -119,6 +119,7 @@ async fn create_and_authenticate_with_extra_client_data() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
 
@@ -183,6 +184,7 @@ async fn create_and_authenticate_with_origin_subdomain() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
 
@@ -200,7 +202,7 @@ async fn create_and_authenticate_with_origin_subdomain() {
             .expect("could not deserialize response");
     assert_eq!(
         att_obj.auth_data.rp_id_hash(),
-        &sha256(b"future.1password.com")
+        &AvailableSha2::sha256(b"future.1password.com")
     );
 
     let auth_options = webauthn::CredentialRequestOptions {
@@ -212,7 +214,10 @@ async fn create_and_authenticate_with_origin_subdomain() {
         .expect("failed to authenticate with freshly created credential");
     let att_obj = ctap2::AuthenticatorData::from_slice(&res.response.authenticator_data)
         .expect("could not deserialize response");
-    assert_eq!(att_obj.rp_id_hash(), &sha256(b"future.1password.com"));
+    assert_eq!(
+        att_obj.rp_id_hash(),
+        &AvailableSha2::sha256(b"future.1password.com")
+    );
 }
 
 #[tokio::test]
@@ -221,6 +226,7 @@ async fn create_and_authenticate_without_rp_id() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
 
@@ -244,7 +250,7 @@ async fn create_and_authenticate_without_rp_id() {
             .expect("could not deserialize response");
     assert_eq!(
         att_obj.auth_data.rp_id_hash(),
-        &sha256(b"www.future.1password.com")
+        &AvailableSha2::sha256(b"www.future.1password.com")
     );
 
     let auth_options = webauthn::CredentialRequestOptions {
@@ -259,7 +265,10 @@ async fn create_and_authenticate_without_rp_id() {
         .expect("failed to authenticate with freshly created credential");
     let att_obj = ctap2::AuthenticatorData::from_slice(&res.response.authenticator_data)
         .expect("could not deserialize response");
-    assert_eq!(att_obj.rp_id_hash(), &sha256(b"www.future.1password.com"));
+    assert_eq!(
+        att_obj.rp_id_hash(),
+        &AvailableSha2::sha256(b"www.future.1password.com")
+    );
 }
 
 #[tokio::test]
@@ -268,6 +277,7 @@ async fn create_and_authenticate_without_cred_params() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
 
@@ -426,6 +436,7 @@ async fn client_register_triggers_uv_when_uv_is_required() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         user_mock_with_uv(),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
     let origin = Url::parse("https://future.1password.com").unwrap();
@@ -453,6 +464,7 @@ async fn client_register_does_not_trigger_uv_when_uv_is_discouraged() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         user_mock_without_uv(),
+        AvailableBackend,
     );
     let mut client = Client::new(auth);
     let origin = Url::parse("https://future.1password.com").unwrap();
@@ -535,18 +547,15 @@ fn map_rk_maps_criteria_to_rk_bool() {
                 up: true,
                 plat: true,
                 client_pin: None,
+                ..Default::default()
             }),
             max_msg_size: None,
             pin_protocols: None,
             transports: None,
+            ..Default::default()
         };
-        let client = Client::new(Authenticator::new(
-            ctap2::Aaguid::new_empty(),
-            MemoryStore::new(),
-            MockUserValidationMethod::verified_user(0),
-        ));
 
-        let result = client.map_rk(&Some(criteria), &auth_info);
+        let result = map_rk(Some(&criteria), &auth_info);
 
         assert_eq!(result, test_case.expected_rk, "{test_case:?}");
     }
@@ -558,6 +567,7 @@ async fn create_and_authenticate_with_related_origins() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(2),
+        AvailableBackend,
     );
 
     let mut client = Client::new_with_custom_tld_provider(
@@ -592,6 +602,7 @@ async fn fail_to_create_with_unrelated_origin() {
         ctap2::Aaguid::new_empty(),
         MemoryStore::new(),
         uv_mock_with_creation(0),
+        AvailableBackend,
     );
 
     let mut client = Client::new_with_custom_tld_provider(
@@ -614,7 +625,7 @@ async fn fail_to_create_with_unrelated_origin() {
     // We can call authenticate without a passkey in the store here
     // since RP validation is before we fetch anything from the store
     let auth_options = webauthn::CredentialRequestOptions {
-        public_key: good_credential_request_options(random_vec(32)),
+        public_key: good_credential_request_options(AvailableRng::random_vec(32)),
     };
     let res = client
         .authenticate(&origin, auth_options, DefaultClientData)

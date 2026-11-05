@@ -17,14 +17,14 @@
 mod client_data;
 pub use client_data::*;
 
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, marker::PhantomData};
 
-use coset::{Algorithm, iana::EnumI64};
 use passkey_authenticator::{Authenticator, CredentialStore, UserValidationMethod};
+use passkey_crypto::{
+    CryptoBackend, PublicKeyT, SecretKeyT, coset::Algorithm, hash::Sha256Backend, iana::EnumI64,
+};
 use passkey_types::{
-    Passkey,
-    crypto::sha256,
-    ctap2, encoding,
+    Bytes, Passkey, ctap2, encoding,
     webauthn::{
         self, AuthenticatorSelectionCriteria, ResidentKeyRequirement, UserVerificationRequirement,
     },
@@ -37,6 +37,11 @@ use url::Url;
 mod extensions;
 mod rp_id_verifier;
 
+#[cfg(all(feature = "linux", target_os = "linux"))]
+pub mod linux;
+#[cfg(all(feature = "windows", target_os = "windows"))]
+pub mod windows;
+
 pub use self::rp_id_verifier::{Fetcher, RelatedOriginResponse, RpIdVerifier};
 
 #[cfg(feature = "android-asset-validation")]
@@ -48,6 +53,7 @@ mod tests;
 #[cfg_attr(feature = "typeshare", typeshare)]
 #[derive(Debug, serde::Serialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "content")]
+#[non_exhaustive]
 /// Errors produced by Webauthn Operations.
 pub enum WebauthnError {
     /// A credential ID can be a maximum of 1023 bytes.
@@ -71,7 +77,10 @@ pub enum WebauthnError {
     /// The string did not match the expected pattern.
     SyntaxError,
     /// The input failed validation
-    ValidationError,
+    ValidationError {
+        /// Context for the validation error
+        context: &'static str,
+    },
     /// The given RpId has possibly rolled out related origins
     RequiresRelatedOriginsSupport,
     /// An error when fetching remote resources
@@ -79,8 +88,23 @@ pub enum WebauthnError {
     /// A redirect that was not allowed occured
     RedirectError,
     /// Related Origins endpoint contains a number of labels exceeding the max limit
+    #[deprecated(since = "0.6.1", note = "No longer used")]
     ExceedsMaxLabelLimit,
+    /// JSON serialization error
+    SerializationError,
+    /// The operation timed out
+    TimeoutError,
 }
+
+const MAX_CREDENTIAL_ID_LENGTH: usize = 1023;
+
+// Library sets tokio import as optional, timeouts rely on it
+// Not sure if tokio should still be optional but guarding for now to avoid breaking changes
+// https://www.w3.org/TR/webauthn-3/#recommended-range-and-default-for-a-webauthn-ceremony-timeout
+#[cfg(feature = "tokio")]
+const MIN_TIMEOUT: u32 = 300_000;
+#[cfg(feature = "tokio")]
+const MAX_TIMEOUT: u32 = 600_000;
 
 impl WebauthnError {
     /// Was the error a vendor error?
@@ -92,14 +116,94 @@ impl WebauthnError {
 impl From<ctap2::StatusCode> for WebauthnError {
     fn from(value: ctap2::StatusCode) -> Self {
         match value {
-            ctap2::StatusCode::Ctap1(u2f) => WebauthnError::AuthenticatorError(u2f.into()),
-            ctap2::StatusCode::Ctap2(ctap2::Ctap2Code::Known(ctap2::Ctap2Error::NoCredentials)) => {
+            ctap2::StatusCode::Known(ctap2::Ctap2Error::NoCredentials) => {
                 WebauthnError::CredentialNotFound
             }
-            ctap2::StatusCode::Ctap2(ctap2code) => {
-                WebauthnError::AuthenticatorError(ctap2code.into())
-            }
+            ctap2code => WebauthnError::AuthenticatorError(ctap2code.into()),
         }
+    }
+}
+
+/// Build the `CollectedClientData`, JSON-serialize it, and derive the client-data
+/// hash that will be signed by the authenticator. Shared by both `Client` and
+/// `LinuxClient` because the client-data step of a WebAuthn ceremony is
+/// authenticator-independent.
+pub(crate) fn build_client_data<D, E, C>(
+    client_data: &D,
+    ty: webauthn::ClientDataType,
+    challenge: &[u8],
+    origin: &Origin<'_>,
+    _crypto: PhantomData<C>,
+) -> Result<(String, Vec<u8>), WebauthnError>
+where
+    D: ClientData<E>,
+    E: Serialize + Clone,
+    C: CryptoBackend,
+{
+    let collected_client_data = webauthn::CollectedClientData::<E> {
+        ty,
+        challenge: encoding::base64url(challenge),
+        origin: origin.to_string(),
+        cross_origin: None,
+        extra_data: client_data.extra_client_data(),
+        unknown_keys: Default::default(),
+    };
+    let client_data_json = serde_json::to_string(&collected_client_data)
+        .map_err(|_| WebauthnError::SerializationError)?;
+    let client_data_hash = client_data
+        .client_data_hash()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| C::Sha256::sha256(client_data_json.as_bytes()).to_vec());
+    Ok((client_data_json, client_data_hash))
+}
+
+/// Resolve the WebAuthn resident-key requirement + authenticator capabilities
+/// into the CTAP2 `rk` option.
+pub(crate) fn map_rk(
+    criteria: Option<&AuthenticatorSelectionCriteria>,
+    auth_info: &ctap2::get_info::Response,
+) -> bool {
+    let supports_rk = auth_info.options.as_ref().is_some_and(|o| o.rk);
+
+    match criteria.unwrap_or(&Default::default()) {
+        // If pkOptions.authenticatorSelection.residentKey is present and set to required.
+        AuthenticatorSelectionCriteria {
+            resident_key: Some(ResidentKeyRequirement::Required),
+            ..
+        } => true,
+
+        // If pkOptions.authenticatorSelection.residentKey is present and set to preferred,
+        // require an rk only if the authenticator advertises support for it.
+        AuthenticatorSelectionCriteria {
+            resident_key: Some(ResidentKeyRequirement::Preferred),
+            ..
+        } => supports_rk,
+
+        // If pkOptions.authenticatorSelection.residentKey is present and set to discouraged.
+        AuthenticatorSelectionCriteria {
+            resident_key: Some(ResidentKeyRequirement::Discouraged),
+            ..
+        } => false,
+
+        // Fall back to the legacy `requireResidentKey` when `residentKey` is absent.
+        AuthenticatorSelectionCriteria {
+            resident_key: None,
+            require_resident_key,
+            ..
+        } => *require_resident_key,
+    }
+}
+
+/// Map [`UserVerificationRequirement`] to the CTAP2 `uv` option, deferring to
+/// the client's preference for `Preferred`.
+pub(crate) fn ctap_uv_option(
+    requirement: UserVerificationRequirement,
+    uv_when_preferred: bool,
+) -> bool {
+    match requirement {
+        UserVerificationRequirement::Discouraged => false,
+        UserVerificationRequirement::Required => true,
+        UserVerificationRequirement::Preferred => uv_when_preferred,
     }
 }
 
@@ -150,49 +254,59 @@ impl Display for Origin<'_> {
 /// default provider implementation. Use `new_with_custom_tld_provider()` to provide a custom
 /// `EffectiveTLDProvider` if your application needs to interpret eTLDs differently from the Mozilla
 /// Public Suffix List.
-pub struct Client<S, U, P, F>
+pub struct Client<S, U, C, P, F>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod + Sync,
+    C: CryptoBackend,
     P: public_suffix::EffectiveTLDProvider + Sync + 'static,
 {
-    authenticator: Authenticator<S, U>,
+    authenticator: Authenticator<S, U, C>,
     rp_id_verifier: RpIdVerifier<P, F>,
+    /// When the RP sends [`UserVerificationRequirement::Preferred`], whether to set CTAP `uv` to true.
+    uv_when_preferred: bool,
+    crypto: PhantomData<C>,
 }
 
-impl<S, U> Client<S, U, public_suffix::PublicSuffixList, ()>
+impl<S, U, C> Client<S, U, C, public_suffix::PublicSuffixList, ()>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod + Sync,
+    C: CryptoBackend + Sync,
     Passkey: TryFrom<<S as CredentialStore>::PasskeyItem>,
 {
     /// Create a `Client` with a given `Authenticator` that uses the default
     /// TLD verifier provided by `[public_suffix]`.
-    pub fn new(authenticator: Authenticator<S, U>) -> Self {
+    pub fn new(authenticator: Authenticator<S, U, C>) -> Self {
         Self {
             authenticator,
             rp_id_verifier: RpIdVerifier::new(public_suffix::DEFAULT_PROVIDER, None),
+            uv_when_preferred: true,
+            crypto: PhantomData,
         }
     }
 }
 
-impl<S, U, P, F> Client<S, U, P, F>
+impl<S, U, C, P, F> Client<S, U, C, P, F>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod<PasskeyItem = <S as CredentialStore>::PasskeyItem> + Sync,
+    C: CryptoBackend,
     P: public_suffix::EffectiveTLDProvider + Sync + 'static,
     F: Fetcher + Sync,
 {
     /// Create a `Client` with a given `Authenticator` and a custom TLD provider
     /// that implements `[public_suffix::EffectiveTLDProvider]`.
     pub fn new_with_custom_tld_provider(
-        authenticator: Authenticator<S, U>,
+        authenticator: Authenticator<S, U, C>,
         custom_provider: P,
         fetcher: Option<F>,
     ) -> Self {
         Self {
             authenticator,
             rp_id_verifier: RpIdVerifier::new(custom_provider, fetcher),
+            uv_when_preferred: true,
+            crypto: PhantomData,
         }
     }
 
@@ -203,13 +317,20 @@ where
     }
 
     /// Read access to the Client's `Authenticator`.
-    pub fn authenticator(&self) -> &Authenticator<S, U> {
+    pub fn authenticator(&self) -> &Authenticator<S, U, C> {
         &self.authenticator
     }
 
     /// Write access to the Client's `Authenticator`.
-    pub fn authenticator_mut(&mut self) -> &mut Authenticator<S, U> {
+    pub fn authenticator_mut(&mut self) -> &mut Authenticator<S, U, C> {
         &mut self.authenticator
+    }
+
+    /// Set the client's preferred user verification setting.
+    /// This setting is used when the RP requirement is [`UserVerificationRequirement::Preferred`] to determine if uv should be set to true.
+    pub fn user_verification_when_preferred(mut self, enabled: bool) -> Self {
+        self.uv_when_preferred = enabled;
+        self
     }
 
     /// Register a webauthn `request` from the given `origin`.
@@ -232,32 +353,30 @@ where
         } else {
             request.pub_key_cred_params
         };
-        // TODO: Handle given timeout here, If the value is not within what we consider a reasonable range
-        // override to our default
-        // let timeout = request
-        //     .timeout
-        //     .map(|t| t.clamp(MIN_TIMEOUT, MAX_TIMEOUT))
-        //     .unwrap_or(MAX_TIMEOUT);
+
+        // Build the timeout for the request, clamping to a reasonable range if the RP provided one,
+        // or using our defaults if not.
+        #[cfg(feature = "tokio")]
+        let timeout = std::time::Duration::from_millis(
+            request
+                .timeout
+                .map(|t| t.clamp(MIN_TIMEOUT, MAX_TIMEOUT))
+                .unwrap_or(MIN_TIMEOUT)
+                .into(),
+        ); // Treat MIN_TIMEOUT as default as per webauthn-3 spec
 
         let rp_id = self
             .rp_id_verifier
             .assert_domain(&origin, request.rp.id.as_deref())
             .await?;
 
-        let collected_client_data = webauthn::CollectedClientData::<E> {
-            ty: webauthn::ClientDataType::Create,
-            challenge: encoding::base64url(&request.challenge),
-            origin: origin.to_string(),
-            cross_origin: None,
-            extra_data: client_data.extra_client_data(),
-            unknown_keys: Default::default(),
-        };
-
-        // SAFETY: it is a developer error if serializing this struct fails.
-        let client_data_json = serde_json::to_string(&collected_client_data).unwrap();
-        let client_data_json_hash = client_data
-            .client_data_hash()
-            .unwrap_or_else(|| sha256(client_data_json.as_bytes()).to_vec());
+        let (client_data_json, client_data_json_hash) = build_client_data(
+            &client_data,
+            webauthn::ClientDataType::Create,
+            &request.challenge,
+            &origin,
+            PhantomData::<C>,
+        )?;
 
         let extension_request = request.extensions.and_then(|e| e.zip_contents());
 
@@ -266,26 +385,42 @@ where
             auth_info.extensions.as_deref().unwrap_or_default(),
         )?;
 
-        let rk = self.map_rk(&request.authenticator_selection, &auth_info);
-        let uv = request.authenticator_selection.map(|s| s.user_verification)
-            != Some(UserVerificationRequirement::Discouraged);
+        let rk = map_rk(request.authenticator_selection.as_ref(), &auth_info);
+        let uv_requirement = request
+            .authenticator_selection
+            .as_ref()
+            .map(|s| s.user_verification)
+            .unwrap_or_default();
+        let uv = ctap_uv_option(uv_requirement, self.uv_when_preferred);
 
+        let make_credential_request = ctap2::make_credential::Request {
+            client_data_hash: client_data_json_hash.into(),
+            rp: ctap2::make_credential::PublicKeyCredentialRpEntity {
+                id: rp_id.to_owned(),
+                name: Some(request.rp.name),
+            },
+            user: request.user,
+            pub_key_cred_params,
+            exclude_list: request.exclude_credentials,
+            extensions: ctap_extensions,
+            options: ctap2::make_credential::Options { rk, up: true, uv },
+            pin_auth: None,
+            pin_protocol: None,
+        };
+
+        #[cfg(feature = "tokio")]
+        let ctap2_response = tokio::time::timeout(
+            timeout,
+            self.authenticator.make_credential(make_credential_request),
+        )
+        .await
+        .map_err(|_| WebauthnError::TimeoutError)?
+        .map_err(|sc| WebauthnError::AuthenticatorError(sc.into()))?;
+
+        #[cfg(not(feature = "tokio"))]
         let ctap2_response = self
             .authenticator
-            .make_credential(ctap2::make_credential::Request {
-                client_data_hash: client_data_json_hash.into(),
-                rp: ctap2::make_credential::PublicKeyCredentialRpEntity {
-                    id: rp_id.to_owned(),
-                    name: Some(request.rp.name),
-                },
-                user: request.user,
-                pub_key_cred_params,
-                exclude_list: request.exclude_credentials,
-                extensions: ctap_extensions,
-                options: ctap2::make_credential::Options { rk, up: true, uv },
-                pin_auth: None,
-                pin_protocol: None,
-            })
+            .make_credential(make_credential_request)
             .await
             .map_err(|sc| WebauthnError::AuthenticatorError(sc.into()))?;
 
@@ -298,6 +433,13 @@ where
             .attested_credential_data
             .as_ref()
             .unwrap();
+
+        // Validate returned credential ID length to comply with new credential registration ceremony spec
+        // https://w3c.github.io/webauthn/#sctn-registering-a-new-credential
+        if credential_id.credential_id().len() > MAX_CREDENTIAL_ID_LENGTH {
+            return Err(WebauthnError::CredentialIdTooLong);
+        }
+
         let alg = match credential_id.key.alg.as_ref().unwrap() {
             Algorithm::PrivateUse(val) => *val,
             Algorithm::Assigned(alg) => alg.to_i64(),
@@ -306,8 +448,11 @@ where
             }
         };
         let public_key = Some(
-            passkey_authenticator::public_key_der_from_cose_key(&credential_id.key)
-                .map_err(|e| WebauthnError::AuthenticatorError(e.into()))?,
+            <<C as CryptoBackend>::SecretKey as SecretKeyT>::PublicKey::der_from_cose_key(
+                &credential_id.key,
+            )
+            .map(Bytes::from)
+            .map_err(|e| WebauthnError::AuthenticatorError(ctap2::Ctap2Error::from(e).into()))?,
         );
 
         let attestation_object = ctap2_response.as_webauthn_bytes();
@@ -353,51 +498,57 @@ where
         let request = request.public_key;
         let auth_info = self.authenticator().get_info().await;
 
-        // TODO: Handle given timeout here, If the value is not within what we consider a reasonable range
-        // override to our default
-        // let timeout = request
-        //     .timeout
-        //     .map(|t| t.clamp(MIN_TIMEOUT, MAX_TIMEOUT))
-        //     .unwrap_or(MAX_TIMEOUT);
+        #[cfg(feature = "tokio")]
+        let timeout = std::time::Duration::from_millis(
+            request
+                .timeout
+                .map(|t| t.clamp(MIN_TIMEOUT, MAX_TIMEOUT))
+                .unwrap_or(MIN_TIMEOUT)
+                .into(),
+        ); // Treat MIN_TIMEOUT as default as per webauthn-3 spec
 
         let rp_id = self
             .rp_id_verifier
             .assert_domain(&origin, request.rp_id.as_deref())
             .await?;
 
-        let collected_client_data = webauthn::CollectedClientData::<E> {
-            ty: webauthn::ClientDataType::Get,
-            challenge: encoding::base64url(&request.challenge),
-            origin: origin.to_string(),
-            cross_origin: None, //Some(false),
-            extra_data: client_data.extra_client_data(),
-            unknown_keys: Default::default(),
-        };
-
-        // SAFETY: it is a developer error if serializing this struct fails.
-        let client_data_json = serde_json::to_string(&collected_client_data).unwrap();
-        let client_data_json_hash = client_data
-            .client_data_hash()
-            .unwrap_or_else(|| sha256(client_data_json.as_bytes()).to_vec());
+        let (client_data_json, client_data_json_hash) = build_client_data(
+            &client_data,
+            webauthn::ClientDataType::Get,
+            &request.challenge,
+            &origin,
+            PhantomData::<C>,
+        )?;
 
         let ctap_extensions = self.auth_extension_ctap2_input(
             &request,
             auth_info.extensions.unwrap_or_default().as_slice(),
         )?;
-        let rk = false;
-        let uv = request.user_verification != UserVerificationRequirement::Discouraged;
+        let uv = ctap_uv_option(request.user_verification, self.uv_when_preferred);
 
+        let get_assertion_request = ctap2::get_assertion::Request {
+            rp_id: rp_id.to_owned(),
+            client_data_hash: client_data_json_hash.into(),
+            allow_list: request.allow_credentials,
+            extensions: ctap_extensions,
+            options: ctap2::get_assertion::Options { up: true, uv },
+            pin_auth: None,
+            pin_protocol: None,
+        };
+
+        #[cfg(feature = "tokio")]
+        let ctap2_response = tokio::time::timeout(
+            timeout,
+            self.authenticator.get_assertion(get_assertion_request),
+        )
+        .await
+        .map_err(|_| WebauthnError::TimeoutError)?
+        .map_err(Into::<WebauthnError>::into)?;
+
+        #[cfg(not(feature = "tokio"))]
         let ctap2_response = self
             .authenticator
-            .get_assertion(ctap2::get_assertion::Request {
-                rp_id: rp_id.to_owned(),
-                client_data_hash: client_data_json_hash.into(),
-                allow_list: request.allow_credentials,
-                extensions: ctap_extensions,
-                options: ctap2::get_assertion::Options { rk, up: true, uv },
-                pin_auth: None,
-                pin_protocol: None,
-            })
+            .get_assertion(get_assertion_request)
             .await
             .map_err(Into::<WebauthnError>::into)?;
 
@@ -423,48 +574,5 @@ where
             authenticator_attachment: Some(self.authenticator().attachment_type()),
             client_extension_results,
         })
-    }
-
-    fn map_rk(
-        &self,
-        criteria: &Option<AuthenticatorSelectionCriteria>,
-        auth_info: &ctap2::get_info::Response,
-    ) -> bool {
-        let supports_rk = auth_info.options.as_ref().is_some_and(|o| o.rk);
-
-        match criteria.as_ref().unwrap_or(&Default::default()) {
-            // > If pkOptions.authenticatorSelection.residentKey:
-            // > is present and set to required
-            AuthenticatorSelectionCriteria {
-                resident_key: Some(ResidentKeyRequirement::Required),
-                ..
-            // > Let requireResidentKey be true.
-            } => true,
-
-            // > is present and set to preferred
-            AuthenticatorSelectionCriteria {
-                resident_key: Some(ResidentKeyRequirement::Preferred),
-                ..
-            // >  And the authenticator is capable of client-side credential storage modality
-            //    > Let requireResidentKey be true.
-            // >  And the authenticator is not capable of client-side credential storage modality, or if the client cannot determine authenticator capability,
-            //    > Let requireResidentKey be false.
-            } => supports_rk,
-
-            // > is present and set to discouraged
-            AuthenticatorSelectionCriteria {
-                resident_key: Some(ResidentKeyRequirement::Discouraged),
-                ..
-            // > Let requireResidentKey be false.
-            } => false,
-
-            // > If pkOptions.authenticatorSelection.residentKey is not present
-            AuthenticatorSelectionCriteria {
-                resident_key: None,
-                require_resident_key,
-                ..
-            // > Let requireResidentKey be the value of pkOptions.authenticatorSelection.requireResidentKey.
-            } => *require_resident_key,
-        }
     }
 }

@@ -9,10 +9,8 @@
 //! [webauthn]: https://w3c.github.io/webauthn/#sctn-defined-extensions
 //! [AuthenticatorDisplayName]: https://w3c.github.io/webauthn/#dom-credentialpropertiesoutput-authenticatordisplayname
 
-use passkey_types::{
-    Passkey,
-    ctap2::{StatusCode, get_assertion, get_info, make_credential},
-};
+use passkey_crypto::CryptoBackend;
+use passkey_types::ctap2::{StatusCode, get_assertion, get_info, make_credential};
 
 mod hmac_secret;
 pub use hmac_secret::{HmacSecretConfig, HmacSecretCredentialSupport};
@@ -23,7 +21,7 @@ pub(crate) use hmac_secret::tests::prf_eval_request;
 #[cfg(doc)]
 use passkey_types::webauthn;
 
-use crate::Authenticator;
+use crate::{Authenticator, passkey::PasskeyAccessor};
 
 #[derive(Debug, Default)]
 #[non_exhaustive]
@@ -57,7 +55,10 @@ pub(super) struct GetExtensionOutputs {
     pub unsigned: Option<get_assertion::UnsignedExtensionOutputs>,
 }
 
-impl<S, U> Authenticator<S, U> {
+impl<S, U, C> Authenticator<S, U, C>
+where
+    C: CryptoBackend,
+{
     pub(super) fn make_extensions(
         &self,
         request: Option<make_credential::ExtensionInputs>,
@@ -93,12 +94,15 @@ impl<S, U> Authenticator<S, U> {
         passkey_types::CredentialExtensions { hmac_secret }
     }
 
-    pub(super) fn get_extensions(
+    pub(super) fn get_extensions<P>(
         &self,
-        passkey: &Passkey,
+        passkey: &P,
         request: Option<get_assertion::ExtensionInputs>,
         uv: bool,
-    ) -> Result<GetExtensionOutputs, StatusCode> {
+    ) -> Result<GetExtensionOutputs, StatusCode>
+    where
+        P: PasskeyAccessor,
+    {
         let Some(ext) = request.and_then(get_assertion::ExtensionInputs::zip_contents) else {
             return Ok(Default::default());
         };
@@ -107,8 +111,8 @@ impl<S, U> Authenticator<S, U> {
             .prf
             .and_then(|salts| {
                 self.get_prf(
-                    &passkey.credential_id,
-                    passkey.extensions.hmac_secret.as_ref(),
+                    passkey.credential_id(),
+                    passkey.extensions().hmac_secret.as_ref(),
                     salts,
                     uv,
                 )

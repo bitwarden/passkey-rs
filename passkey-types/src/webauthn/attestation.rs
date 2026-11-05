@@ -1,6 +1,7 @@
 //! Types specific to public key credential creation
-use coset::iana;
 use indexmap::IndexMap;
+use passkey_crypto::iana::{self, EnumI64};
+use serde::de::Error;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 #[cfg(feature = "typeshare")]
@@ -10,7 +11,7 @@ use crate::{
     Bytes,
     utils::serde::{
         i64_to_iana, ignore_unknown, ignore_unknown_opt_vec, ignore_unknown_vec,
-        maybe_stringified_bool, maybe_stringified_num,
+        maybe_stringified_bool, maybe_stringified_i64, maybe_stringified_num,
     },
     webauthn::{
         AuthenticationExtensionsClientInputs, AuthenticatorAttachment, AuthenticatorTransport,
@@ -89,9 +90,9 @@ pub struct PublicKeyCredentialCreationOptions {
     ///
     /// [Relying Party]: https://w3c.github.io/webauthn/#relying-party
     /// [COSEAlgorithmIdentifier]: https://w3c.github.io/webauthn/#typedefdef-cosealgorithmidentifier
-    /// [-8]: coset::iana::Algorithm::EdDSA
-    /// [-7]: coset::iana::Algorithm::ES256
-    /// [-257]: coset::iana::Algorithm::RS256
+    /// [-8]: passkey_crypto::iana::Algorithm::EdDSA
+    /// [-7]: passkey_crypto::iana::Algorithm::ES256
+    /// [-257]: passkey_crypto::iana::Algorithm::RS256
     #[serde(deserialize_with = "ignore_unknown_vec")]
     pub pub_key_cred_params: Vec<PublicKeyCredentialParameters>,
 
@@ -223,7 +224,7 @@ pub struct PublicKeyCredentialRpEntity {
 /// [RFC8266]: https://www.rfc-editor.org/rfc/rfc8266
 /// [RFC8264]: https://www.rfc-editor.org/rfc/rfc8264
 /// [Lang]: https://w3c.github.io/webauthn/#sctn-strings-langdir
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialUserEntity {
@@ -275,13 +276,13 @@ pub struct PublicKeyCredentialUserEntity {
 /// This type is used to supply additional parameters when creating a new credential.
 ///
 /// <https://w3c.github.io/webauthn/#dictdef-publickeycredentialparameters>
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "typeshare", typeshare)]
 pub struct PublicKeyCredentialParameters {
     /// This member specifies the type of credential to be created. The value SHOULD be a member of
     /// [`PublicKeyCredentialType`] but client platforms MUST ignore unknown values, ignoring any
     /// [`PublicKeyCredentialParameters`] with an [`PublicKeyCredentialType::Unknown`] type.
-    #[serde(rename = "type", deserialize_with = "ignore_unknown")]
+    #[serde(rename = "type")]
     pub ty: PublicKeyCredentialType,
 
     /// This member specifies the cryptographic signature algorithm with which the newly generated
@@ -295,6 +296,36 @@ pub struct PublicKeyCredentialParameters {
     #[cfg_attr(feature = "typeshare", typeshare(serialized_as = "I54"))]
     // because i64 fails for js
     pub alg: iana::Algorithm,
+}
+
+/// Intermediate type for deserializing [`PublicKeyCredentialParameters`].
+///
+/// This ensures the entire JSON object is consumed before validation fails,
+/// which is necessary for `ignore_unknown_vec` to work correctly with streaming
+/// JSON parsers when unknown algorithm values are encountered.
+#[derive(Deserialize)]
+struct PublicKeyCredentialParametersRaw {
+    #[serde(rename = "type", deserialize_with = "ignore_unknown")]
+    ty: PublicKeyCredentialType,
+    #[serde(deserialize_with = "maybe_stringified_i64")]
+    alg: Option<i64>,
+}
+
+impl<'de> Deserialize<'de> for PublicKeyCredentialParameters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = PublicKeyCredentialParametersRaw::deserialize(deserializer)?;
+        let alg_value = raw.alg.ok_or_else(|| D::Error::missing_field("alg"))?;
+        let alg = iana::Algorithm::from_i64(alg_value).ok_or_else(|| {
+            D::Error::invalid_value(
+                serde::de::Unexpected::Signed(alg_value),
+                &"a known IANA COSE algorithm identifier",
+            )
+        })?;
+        Ok(PublicKeyCredentialParameters { ty: raw.ty, alg })
+    }
 }
 
 impl PublicKeyCredentialParameters {
@@ -317,6 +348,15 @@ impl PublicKeyCredentialParameters {
                 alg: iana::Algorithm::RS256,
             },
         ]
+    }
+}
+
+impl From<iana::Algorithm> for PublicKeyCredentialParameters {
+    fn from(value: iana::Algorithm) -> Self {
+        Self {
+            ty: PublicKeyCredentialType::PublicKey,
+            alg: value,
+        }
     }
 }
 
