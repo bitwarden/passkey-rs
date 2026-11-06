@@ -366,6 +366,75 @@ fn float_as_timeout() {
 }
 
 #[test]
+fn ebay_registration_stringified_algs_with_unknown() {
+    // Ebay on Android sends stringified algorithm values AND an unknown -1 algorithm
+    let request = r#"{
+            "publicKey": {
+                "attestation": "direct",
+                "authenticatorSelection": {
+                    "authenticatorAttachment": "platform",
+                    "requireResidentKey": true,
+                    "userVerification": "required"
+                },
+                "challenge": "dGVzdA==",
+                "pubKeyCredParams": [
+                    { "alg": "-7", "type": "public-key" },
+                    { "alg": "-35", "type": "public-key" },
+                    { "alg": "-36", "type": "public-key" },
+                    { "alg": "-257", "type": "public-key" },
+                    { "alg": "-258", "type": "public-key" },
+                    { "alg": "-259", "type": "public-key" },
+                    { "alg": "-37", "type": "public-key" },
+                    { "alg": "-38", "type": "public-key" },
+                    { "alg": "-39", "type": "public-key" },
+                    { "alg": "-1", "type": "public-key" }
+                ],
+                "rp": {
+                    "id": "ebay.com",
+                    "name": "ebay.com"
+                },
+                "user": {
+                    "displayName": "test@test.com",
+                    "id": "dGVzdA==",
+                    "name": "test@test.com"
+                }
+            }
+        }"#;
+
+    let deserialized =
+        serde_json::from_str::<CredentialCreationOptions>(request).expect("Failed to deserialize");
+    // There are 10 in the JSON but we should be ignoring the `alg: "-1"` (unknown, stringified)
+    assert_eq!(deserialized.public_key.pub_key_cred_params.len(), 9);
+}
+
+#[test]
+fn stringified_known_algs_only() {
+    let request = r#"{
+            "publicKey": {
+                "attestation": "direct",
+                "challenge": "dGVzdA==",
+                "pubKeyCredParams": [
+                    { "alg": "-7", "type": "public-key" },
+                    { "alg": "-257", "type": "public-key" }
+                ],
+                "rp": {
+                    "id": "test.com",
+                    "name": "test.com"
+                },
+                "user": {
+                    "displayName": "test@test.com",
+                    "id": "dGVzdA==",
+                    "name": "test@test.com"
+                }
+            }
+        }"#;
+
+    let deserialized =
+        serde_json::from_str::<CredentialCreationOptions>(request).expect("Failed to deserialize");
+    assert_eq!(deserialized.public_key.pub_key_cred_params.len(), 2);
+}
+
+#[test]
 fn wells_fargo() {
     let json = r#"{
           "publicKey": {
@@ -415,4 +484,178 @@ fn wells_fargo() {
 
     // was correctly deserialized to a true boolean value
     assert!(authenticator_selection.require_resident_key);
+}
+
+#[test]
+fn pub_key_cred_params_serialization() {
+    use super::PublicKeyCredentialParameters;
+    use crate::webauthn::PublicKeyCredentialType;
+    use passkey_crypto::iana::Algorithm;
+
+    // Test that serialization produces numeric alg values (not stringified)
+    let params = PublicKeyCredentialParameters {
+        ty: PublicKeyCredentialType::PublicKey,
+        alg: Algorithm::ES256,
+    };
+
+    let serialized = serde_json::to_string(&params).expect("Failed to serialize");
+    assert!(
+        serialized.contains("\"alg\":-7"),
+        "Algorithm should serialize as numeric -7, got: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("\"type\":\"public-key\""),
+        "Type should serialize as public-key, got: {}",
+        serialized
+    );
+
+    // Test round-trip: deserialize stringified, serialize to numeric
+    let stringified_json = r#"{"alg": "-257", "type": "public-key"}"#;
+    let deserialized: PublicKeyCredentialParameters =
+        serde_json::from_str(stringified_json).expect("Failed to deserialize");
+    assert_eq!(deserialized.alg, Algorithm::RS256);
+
+    let re_serialized = serde_json::to_string(&deserialized).expect("Failed to re-serialize");
+    assert!(
+        re_serialized.contains("\"alg\":-257"),
+        "Re-serialized should have numeric alg, got: {}",
+        re_serialized
+    );
+}
+
+#[test]
+fn pub_key_cred_params_float_alg() {
+    // Float algorithm value (e.g., from JavaScript)
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": -7.0, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_stringified_float_alg() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": "-7.0", "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_null_alg_skipped() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": null, "type": "public-key" },
+                { "alg": -7, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_non_numeric_string_alg_skipped() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": "ES256", "type": "public-key" },
+                { "alg": -7, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_missing_alg_skipped() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "type": "public-key" },
+                { "alg": -7, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_missing_type_skipped() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": -7 },
+                { "alg": -257, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
+}
+
+#[test]
+fn pub_key_cred_params_unknown_type_not_filtered() {
+    // Per spec, unknown types SHOULD be ignored, but ignore_unknown_vec doesn't filter by type.
+    // Downstream code is responsible for filtering elements with Unknown type.
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": -7, "type": "unknown-type" },
+                { "alg": -257, "type": "public-key" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 2);
+}
+
+#[test]
+fn pub_key_cred_params_extra_fields_ignored() {
+    let json = r#"{
+        "publicKey": {
+            "challenge": "dGVzdA==",
+            "pubKeyCredParams": [
+                { "alg": -7, "type": "public-key", "extra": "ignored" }
+            ],
+            "rp": { "id": "test.com", "name": "test" },
+            "user": { "displayName": "test", "id": "dGVzdA==", "name": "test" }
+        }
+    }"#;
+    let result: CredentialCreationOptions = serde_json::from_str(json).unwrap();
+    assert_eq!(result.public_key.pub_key_cred_params.len(), 1);
 }

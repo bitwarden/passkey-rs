@@ -55,7 +55,7 @@ pub struct PublicKeyCredential<R: AuthenticatorResponse> {
     /// authenticators.
     ///
     /// > NOTE: This API does not constrain the format or length of this identifier, except that it
-    /// MUST be sufficient for the authenticator to uniquely select a key.
+    /// > MUST be sufficient for the authenticator to uniquely select a key.
     pub id: String,
 
     /// The raw byte containing the credential ID, see [Self::id] for more information.

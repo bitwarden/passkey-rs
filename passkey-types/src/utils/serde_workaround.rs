@@ -11,7 +11,7 @@ macro_rules! serde_workaround {
         $(#[$attr:meta])*
         pub struct $name:ident {$(
             $(#[doc=$doc:literal])*
-            #[serde(rename = $discriminant:literal$(,$default:ident)?$(,skip_serializing_if = $method:path)?$(,deserialize_with = $de:path)?)]
+            #[serde(rename = $discriminant:literal$(;$default:ident)?$(,skip_serializing_if = $method:path)?$(,deserialize_with = $de:path)?)]
             $vis:vis $field:ident: $ty:ty,
         )*}
     ) => {

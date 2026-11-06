@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 
-use super::u2f::{AuthenticationRequest, RegisterRequest, RegisterResponse};
-use crate::{Bytes, ctap2::make_credential as ctap2, webauthn};
-use coset::CoseKey;
+use crate::{Bytes, webauthn};
+use passkey_crypto::CoseKey;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(feature = "testable")]
@@ -79,6 +78,22 @@ pub struct Passkey {
     /// [Discoverable Credential]: https://w3c.github.io/webauthn/#client-side-discoverable-credential
     pub user_handle: Option<Bytes>,
 
+    /// This is the [`webauthn::PublicKeyCredentialUserEntity::name`] passed in during the creation
+    /// of this credential. An authenticator can choose to store this or not.
+    ///
+    /// # PII Considerations
+    /// This is the username which is a human readable personal identifier. While it does not get
+    /// over the wire to the Relying Party it may be used in displays.
+    pub username: Option<String>,
+
+    /// This is the [`webauthn::PublicKeyCredentialUserEntity::display_name`] passed in during the creation
+    /// of this credential. An authenticator can choose to store this or not.
+    ///
+    /// # PII Considerations
+    /// This is the human-readable name for a user account. While it does not get sent
+    /// over the wire to the Relying Party it may be used in displays.
+    pub user_display_name: Option<String>,
+
     /// Value tracks the number of times an authentication ceremony has been successfully completed.
     /// If the value is `None` then it will be sent as the constant `0`.
     /// See [Signature counter considerations][signCount] for more information.
@@ -97,77 +112,13 @@ pub struct Passkey {
 }
 
 impl Passkey {
-    /// Standardized way to "upgrade" a U2F register request into a passkey
-    pub fn from_u2f_register_response(
-        request: &RegisterRequest,
-        response: &RegisterResponse,
-        private_key: &CoseKey,
-    ) -> Self {
-        let app_id: Bytes = request.application.to_vec().into();
-        Self {
-            key: private_key.clone(),
-            credential_id: response.key_handle.clone().to_vec().into(),
-            rp_id: app_id.into(),
-            user_handle: None,
-            counter: Some(0),
-            extensions: Default::default(),
-        }
-    }
-
-    /// Upgrade a U2F Authentication Request into a Passkey
-    pub fn from_u2f_auth_request(
-        request: &AuthenticationRequest,
-        counter: u32,
-        private_key: &CoseKey,
-    ) -> Self {
-        let app_id: Bytes = request.application.to_vec().into();
-        Self {
-            key: private_key.clone(),
-            credential_id: request.key_handle.clone().to_vec().into(),
-            rp_id: app_id.into(),
-            user_handle: None,
-            counter: Some(counter),
-            extensions: Default::default(),
-        }
-    }
-
-    /// This function wraps up a U2F registration request as a Passkey for storing
-    /// in a CredentialStore.
-    pub fn wrap_u2f_registration_request(
-        request: &RegisterRequest,
-        response: &RegisterResponse,
-        key_handle: &[u8],
-        private_key: &CoseKey,
-    ) -> (
-        Passkey,
-        ctap2::PublicKeyCredentialUserEntity,
-        ctap2::PublicKeyCredentialRpEntity,
-    ) {
-        let passkey = Passkey::from_u2f_register_response(request, response, private_key);
-
-        let user_entity = ctap2::PublicKeyCredentialUserEntity {
-            id: key_handle.to_vec().into(),
-            display_name: None,
-            name: None,
-            icon_url: None,
-        };
-
-        let app_id: Bytes = request.application.to_vec().into();
-        let rp = ctap2::PublicKeyCredentialRpEntity {
-            id: app_id.into(),
-            name: None,
-        };
-
-        (passkey, user_entity, rp)
-    }
-
     /// Create a passkey mock builder.
     ///
     /// The default credential Id length is 16, change it with the [`PasskeyBuilder::credential_id`]
     /// method.
     #[cfg(feature = "testable")]
-    pub fn mock(rp_id: String) -> PasskeyBuilder {
-        PasskeyBuilder::new(rp_id)
+    pub fn mock<C: passkey_crypto::CryptoBackend>(rp_id: String, crypto: C) -> PasskeyBuilder<C> {
+        PasskeyBuilder::new(rp_id, crypto)
     }
 }
 
@@ -201,7 +152,7 @@ impl Debug for Passkey {
 }
 
 /// Supported extensions on a [`Passkey`]
-#[derive(Default, Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Debug, Default, Clone, Zeroize, ZeroizeOnDrop)]
 #[cfg_attr(any(test, feature = "testable"), derive(PartialEq))]
 pub struct CredentialExtensions {
     /// Whether the passkey has hmac-secret credentials associated to it
@@ -216,4 +167,20 @@ pub struct StoredHmacSecret {
     pub cred_with_uv: Vec<u8>,
     /// The credential that is not gated behind user verification, but is gated behind user presence
     pub cred_without_uv: Option<Vec<u8>>,
+}
+
+impl Debug for StoredHmacSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoredHmacSecret")
+            .field("cred_with_uv", &"<Redacted>")
+            .field(
+                "cred_without_uv",
+                if self.cred_without_uv.is_some() {
+                    &"<Redacted>"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }

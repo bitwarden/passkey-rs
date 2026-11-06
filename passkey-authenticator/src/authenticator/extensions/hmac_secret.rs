@@ -1,15 +1,12 @@
 use std::ops::Not;
 
-use passkey_types::{
-    crypto::hmac_sha256,
-    ctap2::{
-        Ctap2Error, StatusCode, U2FError,
-        extensions::{
-            AuthenticatorPrfGetOutputs, AuthenticatorPrfInputs, AuthenticatorPrfMakeOutputs,
-            AuthenticatorPrfValues, HmacSecretSaltOrOutput,
-        },
+use passkey_crypto::{CryptoBackend, hash::Sha256Backend, rng::RngBackend};
+use passkey_types::ctap2::{
+    Ctap2Error, StatusCode,
+    extensions::{
+        AuthenticatorPrfGetOutputs, AuthenticatorPrfInputs, AuthenticatorPrfMakeOutputs,
+        AuthenticatorPrfValues, HmacSecretSaltOrOutput,
     },
-    rand::random_vec,
 };
 
 use crate::Authenticator;
@@ -81,7 +78,10 @@ impl HmacSecretCredentialSupport {
     }
 }
 
-impl<S, U> Authenticator<S, U> {
+impl<S, U, C> Authenticator<S, U, C>
+where
+    C: CryptoBackend,
+{
     pub(super) fn make_hmac_secret(
         &self,
         hmac_secret_request: Option<bool>,
@@ -96,8 +96,11 @@ impl<S, U> Authenticator<S, U> {
         }
 
         Some(passkey_types::StoredHmacSecret {
-            cred_with_uv: random_vec(32),
-            cred_without_uv: config.credentials.without_uv().then(|| random_vec(32)),
+            cred_with_uv: <C as CryptoBackend>::Rng::random_vec(32),
+            cred_without_uv: config
+                .credentials
+                .without_uv()
+                .then(|| <C as CryptoBackend>::Rng::random_vec(32)),
         })
     }
 
@@ -124,7 +127,7 @@ impl<S, U> Authenticator<S, U> {
                 request.eval.map(|eval| {
                     let request = HmacSecretSaltOrOutput::new(eval.first, eval.second);
 
-                    calculate_hmac_secret(creds, request, config, uv)
+                    Self::calculate_hmac_secret(creds, request, config, uv)
                 })
             })
             .flatten()
@@ -150,13 +153,15 @@ impl<S, U> Authenticator<S, U> {
             return Ok(None);
         };
 
-        let hmac_creds = passkey_ext.ok_or(U2FError::InvalidParameter)?;
+        let Some(hmac_creds) = passkey_ext else {
+            return Ok(None);
+        };
 
         let Some(request) = select_salts(credential_id, salts) else {
             return Ok(None);
         };
 
-        let results = calculate_hmac_secret(hmac_creds, request, config, uv)?;
+        let results = Self::calculate_hmac_secret(hmac_creds, request, config, uv)?;
 
         Ok(Some(AuthenticatorPrfGetOutputs {
             results: AuthenticatorPrfValues {
@@ -165,42 +170,44 @@ impl<S, U> Authenticator<S, U> {
             },
         }))
     }
-}
 
-/// Calculates the Hmac secret output given the stored credentials and given salts.
-///
-/// ## Process
-/// * The authenticator chooses which CredRandom to use for next step based on whether user verification was done or not in above steps.
-///   * If uv bit is set to `true` in the response, let CredRandom be [`passkey_types::StoredHmacSecret::cred_with_uv`].
-///   * If uv bit is set to `false` in the response, let CredRandom be [`passkey_types::StoredHmacSecret::cred_without_uv`].
-/// * If the authenticator cannot find corresponding CredRandom associated with the credential, authenticator ignores this extension and does not add any response from this extension to "extensions" field of the authenticatorGetAssertion response.
-/// * The authenticator generates one or two HMAC-SHA-256 values, depending upon whether it received one salt (32 bytes) or two salts (64 bytes):
-///   * output1: `HMAC-SHA-256(CredRandom, salt1)`
-///   * output2: `HMAC-SHA-256(CredRandom, salt2)`
-///
-/// <https://fidoalliance.org/specs/fido-v2.2-ps-20250228/fido-client-to-authenticator-protocol-v2.2-ps-20250228.html#sctn-hmac-secret-extension>
-fn calculate_hmac_secret(
-    hmac_creds: &passkey_types::StoredHmacSecret,
-    salts: HmacSecretSaltOrOutput,
-    config: &HmacSecretConfig,
-    uv: bool,
-) -> Result<HmacSecretSaltOrOutput, StatusCode> {
-    let cred_random = if uv {
-        &hmac_creds.cred_with_uv
-    } else {
-        config
-            .supports_no_uv()
-            .then_some(hmac_creds.cred_without_uv.as_ref())
-            .flatten()
-            .ok_or(Ctap2Error::UserVerificationBlocked)?
-    };
+    /// Calculates the Hmac secret output given the stored credentials and given salts.
+    ///
+    /// ## Process
+    /// * The authenticator chooses which CredRandom to use for next step based on whether user verification was done or not in above steps.
+    ///   * If uv bit is set to `true` in the response, let CredRandom be [`passkey_types::StoredHmacSecret::cred_with_uv`].
+    ///   * If uv bit is set to `false` in the response, let CredRandom be [`passkey_types::StoredHmacSecret::cred_without_uv`].
+    /// * If the authenticator cannot find corresponding CredRandom associated with the credential, authenticator ignores this extension and does not add any response from this extension to "extensions" field of the authenticatorGetAssertion response.
+    /// * The authenticator generates one or two HMAC-SHA-256 values, depending upon whether it received one salt (32 bytes) or two salts (64 bytes):
+    ///   * output1: `HMAC-SHA-256(CredRandom, salt1)`
+    ///   * output2: `HMAC-SHA-256(CredRandom, salt2)`
+    ///
+    /// <https://fidoalliance.org/specs/fido-v2.2-ps-20250228/fido-client-to-authenticator-protocol-v2.2-ps-20250228.html#sctn-hmac-secret-extension>
+    fn calculate_hmac_secret(
+        hmac_creds: &passkey_types::StoredHmacSecret,
+        salts: HmacSecretSaltOrOutput,
+        config: &HmacSecretConfig,
+        uv: bool,
+    ) -> Result<HmacSecretSaltOrOutput, StatusCode> {
+        let cred_random = if uv {
+            &hmac_creds.cred_with_uv
+        } else {
+            config
+                .supports_no_uv()
+                .then_some(hmac_creds.cred_without_uv.as_ref())
+                .flatten()
+                .ok_or(Ctap2Error::UserVerificationBlocked)?
+        };
 
-    let output1 = hmac_sha256(cred_random, salts.first());
-    let output2 = salts.second().map(|salt2| hmac_sha256(cred_random, salt2));
+        let output1 = C::Sha256::hmac_sha256(cred_random, salts.first());
+        let output2 = salts
+            .second()
+            .map(|salt2| C::Sha256::hmac_sha256(cred_random, salt2));
 
-    let result = HmacSecretSaltOrOutput::new(output1, output2);
+        let result = HmacSecretSaltOrOutput::new(output1, output2);
 
-    Ok(result)
+        Ok(result)
+    }
 }
 
 fn select_salts(

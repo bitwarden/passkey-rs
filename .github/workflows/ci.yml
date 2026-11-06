@@ -8,119 +8,306 @@ on:
 
 name: CI
 
+env:
+  RUST_VERSION: "1.90"
+
 permissions: {}
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     strategy:
       matrix:
-        rust:
-          - 1.91.1
+        backend: [rust-crypto, aws-lc-rs]
+    permissions:
+      contents: read
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Install mingw toolchain and NASM
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
 
       - name: Run Clippy
-        run: rustup run ${{ matrix.rust }} cargo clippy --all --all-targets --all-features -- -D warnings
+        run: rustup run "$RUST_VERSION" cargo clippy --all --all-targets --features ${{ matrix.backend }} -- -D warnings
+
+      - name: Run Clippy with `linux` feature
+        run: rustup run "$RUST_VERSION" cargo clippy --all --features linux,${{ matrix.backend }} -- -D warnings
+
+      - name: Run Clippy with `windows` feature
+        run: rustup run "$RUST_VERSION" cargo clippy --all --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }} -- -D warnings
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     strategy:
       matrix:
-        rust:
-          - 1.91.1
+        backend: [rust-crypto, aws-lc-rs]
+    permissions:
+      contents: read
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
+          targets: x86_64-pc-windows-gnu
 
       - name: Run Rustfmt
-        run: rustup run ${{ matrix.rust }} cargo fmt --all -- --check
+        run: rustup run "$RUST_VERSION" cargo fmt --all -- --check
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        features: [rust-crypto, aws-lc-rs, linux, windows]
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@81ecf985428d5c2ea81dbf079bceca32bc9604ab # v2.62.43
+        with:
+          tool: cargo-deny
+
+      - name: Run Cargo Deny
+        run: cargo deny --features ${{ matrix.features }} check bans licenses sources
 
   semver-checks:
+    name: Semver Checks
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Check semver
-        uses: obi1kenobi/cargo-semver-checks-action@5b298c9520f7096a4683c0bd981a7ac5a7e249ae # v2.8
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@81ecf985428d5c2ea81dbf079bceca32bc9604ab # v2.62.43
+        with:
+          tool: cargo-semver-checks
+
+      - name: Check semver with default features
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-authenticator --package passkey-client
+          --package passkey-transports --package passkey-types
+          --default-features
+
+      - name: Check semver with `linux` feature
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-authenticator --package passkey-client
+          --package passkey-transports
+          --default-features --features linux
+
+      - name: Check semver with `windows` feature
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-client
+          --default-features --features windows
+          --target x86_64-pc-windows-gnu
 
   docs:
     name: Documentation
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     strategy:
       matrix:
-        rust:
-          - 1.91.1
+        backend: [rust-crypto, aws-lc-rs]
+    permissions:
+      contents: read
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Install mingw toolchain and NASM
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-gnu
+
+      - name: Run rustdoc
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --features ${{ matrix.backend }}
+
+      - name: Run rustdoc with `linux` feature
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --features linux,${{ matrix.backend }}
+
+      - name: Run rustdoc with `windows` feature
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }}
+
+  build-wasm:
+    name: Build-WASM
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        backend: [rust-crypto, aws-lc-rs]
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
+      - name: Install clang and emscripten
+        run: sudo apt-get update && sudo apt-get install -y clang emscripten
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-emscripten
+
+      - name: Run build
+        run: rustup run "$RUST_VERSION" cargo build --features "passkey-crypto/js,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}" --target wasm32-unknown-emscripten
+
+  test-linux:
+    name: Test-Linux
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        backend: [rust-crypto, aws-lc-rs]
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Run rustdoc
-        run: RUSTDOCFLAGS="-D warnings " rustup run ${{ matrix.rust }} cargo doc --workspace --no-deps --all-features
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
 
-  test:
-    name: Test
+      - name: Run tests with `linux` feature
+        run: rustup run "$RUST_VERSION" cargo test --features "linux,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
+
+  test-crypto-backend-compatibility:
+    name: Test-Crypto-Backend-Compatibility
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    strategy:
-      matrix:
-        rust:
-          - 1.91.1
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Run cross-backend compatibility tests
+        run: rustup run "$RUST_VERSION" cargo test -p passkey-crypto --features rust-crypto,aws-lc-rs
+
+  test-windows:
+    name: Test-Windows
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        backend: [rust-crypto, aws-lc-rs]
+        runs-on:
+          - windows-11-arm
+          - windows-2025
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Run tests
-        run: rustup run ${{ matrix.rust }} cargo test
+        run: rustup run "$RUST_VERSION" cargo test --features "windows,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
+
+  test-macos:
+    name: Test-MacOS
+    runs-on: ${{ matrix.runs-on }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        backend: [rust-crypto, aws-lc-rs]
+        runs-on:
+          - macos-15-intel
+          - macos-26
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Run tests
+        run: rustup run "$RUST_VERSION" cargo test --features "passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
 
   typeshare:
     name: Typeshare
@@ -129,8 +316,6 @@ jobs:
       contents: read
     strategy:
       matrix:
-        rust:
-          - 1.91.1
         lang:
           - typescript
           - kotlin
@@ -144,20 +329,20 @@ jobs:
             lang: swift
     steps:
       - name: Check out repo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 # v1.15.1
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Install Typeshare
+      - name: Install typeshare CLI
         uses: clechasseur/rs-cargo@bbcc0f43bb19de578aed0eaf1211970155d0fbcd # v4.0.0
         with:
           command: install
-          args: --version 1.7.0 --locked typeshare-cli
+          args: --version 1.13.4 --locked typeshare-cli
 
-      - name: Run Typeshare
+      - name: Run typeshare CLI
         run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}

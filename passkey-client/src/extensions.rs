@@ -11,6 +11,7 @@
 //! [prf]: https://w3c.github.io/webauthn/#prf-extension
 
 use passkey_authenticator::{CredentialStore, StoreInfo, UserValidationMethod};
+use passkey_crypto::CryptoBackend;
 use passkey_types::{
     ctap2::{get_assertion, get_info, make_credential},
     webauthn::{
@@ -23,10 +24,11 @@ use crate::{Client, WebauthnError};
 
 mod prf;
 
-impl<S, U, P, F> Client<S, U, P, F>
+impl<S, U, C, P, F> Client<S, U, C, P, F>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod + Sync,
+    C: CryptoBackend,
     P: public_suffix::EffectiveTLDProvider + Sync + 'static,
 {
     /// Create the extension inputs to be passed to an authenticator over CTAP2
@@ -36,7 +38,7 @@ where
         request: Option<&AuthenticationExtensionsClientInputs>,
         supported_extensions: &[get_info::Extension],
     ) -> Result<Option<make_credential::ExtensionInputs>, WebauthnError> {
-        prf::registration_prf_to_ctap2_input(request, supported_extensions)
+        Self::registration_prf_to_ctap2_input(request, supported_extensions)
     }
 
     /// Build the extension outputs for the WebAuthn client in a registration request.
@@ -73,7 +75,7 @@ where
         request: &PublicKeyCredentialRequestOptions,
         supported_extensions: &[get_info::Extension],
     ) -> Result<Option<get_assertion::ExtensionInputs>, WebauthnError> {
-        prf::auth_prf_to_ctap2_input(request, supported_extensions)
+        Self::auth_prf_to_ctap2_input(request, supported_extensions)
     }
 
     /// Build the extension outputs for the WebAuthn client in an authentication request.

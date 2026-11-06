@@ -1,60 +1,58 @@
-use coset::{CoseKeyBuilder, iana};
-use p256::{SecretKey, ecdsa::SigningKey};
+use passkey_crypto::{CryptoBackend, SecretKeyT, iana, rng::RngBackend};
 
-use crate::{Passkey, StoredHmacSecret, rand::random_vec};
+use crate::{Passkey, StoredHmacSecret};
 
 /// A builder for the [`Passkey`] type which should be used as a mock for testing.
-pub struct PasskeyBuilder {
+pub struct PasskeyBuilder<C> {
     inner: Passkey,
+    _crypto: C,
 }
 
-impl PasskeyBuilder {
+impl<C: CryptoBackend> PasskeyBuilder<C> {
     /// Create a new
-    pub(super) fn new(rp_id: String) -> Self {
-        let private_key = {
-            let mut rng = rand::thread_rng();
-            SecretKey::random(&mut rng)
-        };
+    pub(super) fn new(rp_id: String, _crypto: C) -> Self {
+        // This expect is safe since this is test code and should never be used in production.
+        let private_key = _crypto
+            .generate_key(iana::Algorithm::ES256)
+            .expect("The crypto backend does not support ES256");
 
-        let public_key = SigningKey::from(&private_key)
-            .verifying_key()
-            .to_encoded_point(false);
-        // SAFETY: These unwraps are safe because the public_key above is not compressed (false
-        // parameter) therefore x and y are guaranteed to contain values.
-        #[allow(deprecated)]
-        let x = public_key.x().unwrap().as_slice().to_vec();
-        #[allow(deprecated)]
-        let y = public_key.y().unwrap().as_slice().to_vec();
-        let private = CoseKeyBuilder::new_ec2_priv_key(
-            iana::EllipticCurve::P_256,
-            x,
-            y,
-            private_key.to_bytes().to_vec(),
-        )
-        .algorithm(iana::Algorithm::ES256)
-        .build();
-
+        let private = private_key.to_cose_key();
         Self {
             inner: Passkey {
                 key: private,
-                credential_id: random_vec(16).into(),
+                credential_id: C::Rng::random_vec(16).into(),
                 rp_id,
                 user_handle: None,
+                username: None,
+                user_display_name: None,
                 counter: None,
                 extensions: Default::default(),
             },
+            _crypto,
         }
     }
 
     /// Regenerate the credential ID with a different size than the default 16 bytes
     pub fn credential_id(mut self, len: usize) -> Self {
-        self.inner.credential_id = random_vec(len).into();
+        self.inner.credential_id = C::Rng::random_vec(len).into();
         self
     }
 
     /// Generate the user handle with an optional custom size. The default is 16 bytes.
     pub fn user_handle(mut self, len: Option<usize>) -> Self {
-        self.inner.user_handle = Some(random_vec(len.unwrap_or(16)).into());
+        self.inner.user_handle = Some(C::Rng::random_vec(len.unwrap_or(16)).into());
+        self
+    }
+
+    /// Set the username for the passkey. The default is None
+    pub fn username(mut self, username: String) -> Self {
+        self.inner.username = Some(username);
+        self
+    }
+    ///
+    /// Set the user display name for the passkey. The default is None
+    pub fn user_display_name(mut self, user_display_name: String) -> Self {
+        self.inner.user_display_name = Some(user_display_name);
         self
     }
 

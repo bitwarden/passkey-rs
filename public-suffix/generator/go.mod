@@ -1,7 +1,8 @@
 module go.1password.io/generator
 
-require golang.org/x/net v0.0.0-20220708220712-1185a9018129
+go 1.26.0
 
-require golang.org/x/text v0.3.7 // indirect
-
-go 1.17
+require (
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+)

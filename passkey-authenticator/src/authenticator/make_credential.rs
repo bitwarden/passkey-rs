@@ -1,4 +1,4 @@
-use p256::SecretKey;
+use passkey_crypto::{CryptoBackend, rng::RngBackend};
 use passkey_types::{
     Passkey,
     ctap2::{
@@ -9,10 +9,11 @@ use passkey_types::{
 
 use crate::{Authenticator, CoseKeyPair, CredentialStore, UiHint, UserValidationMethod};
 
-impl<S, U> Authenticator<S, U>
+impl<S, U, C> Authenticator<S, U, C>
 where
     S: CredentialStore + Sync,
     U: UserValidationMethod<PasskeyItem = <S as CredentialStore>::PasskeyItem> + Sync,
+    C: CryptoBackend,
 {
     /// This method is invoked by the host to request generation of a new credential in the authenticator.
     pub async fn make_credential(&mut self, input: Request) -> Result<Response, StatusCode> {
@@ -24,7 +25,7 @@ where
         //    on this authenticator and bound to the specified rpId, wait for user presence, then
         //    terminate this procedure and return error code CTAP2_ERR_CREDENTIAL_EXCLUDED. User
         //    presence check is required for CTAP2 authenticators before the RP gets told that the
-        //    token is already registered to behave similarly to CTAP1/U2F authenticators.
+        //    token is already registered.
 
         if input
             .exclude_list
@@ -111,19 +112,19 @@ where
             .await?;
 
         // 9. Generate a new credential key pair for the algorithm specified.
-        let credential_id = passkey_types::rand::random_vec(self.credential_id_length.into());
+        let credential_id = <C as CryptoBackend>::Rng::random_vec(self.credential_id_length.into());
 
-        let private_key = {
-            let mut rng = rand::thread_rng();
-            SecretKey::random(&mut rng)
-        };
+        let private_key = self
+            .crypto
+            .generate_key(algorithm)
+            .map_err(|_| Ctap2Error::UnsupportedAlgorithm)?;
 
         let extensions = self.make_extensions(input.extensions, flags.contains(Flags::UV))?;
 
         // Encoding of the key pair into their CoseKey representation before moving the private CoseKey
         // into the passkey. Keeping the public key ready for step 11 below and returning the attested
         // credential.
-        let CoseKeyPair { public, private } = CoseKeyPair::from_secret_key(&private_key, algorithm);
+        let CoseKeyPair { public, private } = CoseKeyPair::from_secret_key(&private_key);
 
         let store_info = self.store.get_info().await;
 
@@ -135,7 +136,9 @@ where
             key: private,
             rp_id: input.rp.id.clone(),
             credential_id: credential_id.into(),
-            user_handle: is_passkey_rk.then_some(input.user.id.clone()),
+            user_handle: is_passkey_rk.then(|| input.user.id.clone()),
+            username: is_passkey_rk.then(|| input.user.name.clone()),
+            user_display_name: is_passkey_rk.then(|| input.user.display_name.clone()),
             counter: self.make_credentials_with_signature_counter.then_some(0),
             extensions: extensions.credential,
         };
@@ -159,15 +162,15 @@ where
         )
         .unwrap();
 
-        let auth_data = AuthenticatorData::new(&input.rp.id, passkey.counter)
+        let auth_data = AuthenticatorData::new(&input.rp.id, passkey.counter, &self.crypto)
             .set_flags(flags)
             .set_attested_credential_data(acd)
             .set_make_credential_extensions(extensions.signed)?;
 
         let response = Response {
-            fmt: "None".into(),
+            fmt: "none".into(),
             auth_data,
-            att_stmt: coset::cbor::value::Value::Map(vec![]),
+            att_stmt: ciborium::Value::Map(vec![]),
             ep_att: None,
             large_blob_key: None,
             unsigned_extension_outputs: extensions.unsigned,
