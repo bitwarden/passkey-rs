@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use hidreport::{Field, Report, ReportDescriptor, UsagePage};
 use rand::Rng;
-use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 use tokio::time::timeout;
 
@@ -291,8 +290,10 @@ impl HidDevice {
             .write(true)
             .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
             .open(path)?;
-        // let fd: OwnedFd = file.into();
-        let fd = AsyncFd::with_interest(file, Interest::READABLE | Interest::WRITABLE)?;
+        // SAFETY: `file` is moved into the `AsyncFd`, which owns it until drop, so its file
+        // descriptor stays open and refers to the same file description for the `AsyncFd`'s
+        // entire lifetime. We never replace the inner `File` via `get_mut` or `into_inner`.
+        let fd = unsafe { AsyncFd::register(file) }?;
         Ok(Self { fd })
     }
 
