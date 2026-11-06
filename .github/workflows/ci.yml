@@ -1,11 +1,21 @@
-on: push
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 name: CI
 
 env:
-  rust: ${{ '1.90' }}
+  RUST_VERSION: "1.90"
 
 permissions: {}
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   clippy:
@@ -17,23 +27,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
-          target: x86_64-pc-windows-gnu
+          targets: x86_64-pc-windows-gnu
 
       - name: Install libudev
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
@@ -42,13 +46,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
 
       - name: Run Clippy
-        run: rustup run ${{ env.rust }} cargo clippy --all --all-targets --features ${{ matrix.backend }} -- -D warnings
+        run: rustup run "$RUST_VERSION" cargo clippy --all --all-targets --features ${{ matrix.backend }} -- -D warnings
 
       - name: Run Clippy with `linux` feature
-        run: rustup run ${{ env.rust }} cargo clippy --all --features linux,${{ matrix.backend }} -- -D warnings
+        run: rustup run "$RUST_VERSION" cargo clippy --all --features linux,${{ matrix.backend }} -- -D warnings
 
       - name: Run Clippy with `windows` feature
-        run: rustup run ${{ env.rust }} cargo clippy --all --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }} -- -D warnings
+        run: rustup run "$RUST_VERSION" cargo clippy --all --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }} -- -D warnings
 
   fmt:
     name: Rustfmt
@@ -59,26 +63,20 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
-          target: x86_64-pc-windows-gnu
+          targets: x86_64-pc-windows-gnu
 
       - name: Run Rustfmt
-        run: rustup run ${{ env.rust }} cargo fmt --all -- --check
+        run: rustup run "$RUST_VERSION" cargo fmt --all -- --check
 
   deny:
     name: Cargo Deny
@@ -89,32 +87,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Run Cargo Deny
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          command: check bans licenses sources
-          arguments: --features ${{ matrix.features }}
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@81ecf985428d5c2ea81dbf079bceca32bc9604ab # v2.62.43
+        with:
+          tool: cargo-deny
+
+      - name: Run Cargo Deny
+        run: cargo deny --features ${{ matrix.features }} check bans licenses sources
 
   semver-checks:
+    name: Semver Checks
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,26 +119,37 @@ jobs:
       - name: Install libudev
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
 
-      - name: Check semver with default features
-        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          package: passkey,passkey-authenticator,passkey-client,passkey-transports,passkey-types
-          feature-group: default-features
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@81ecf985428d5c2ea81dbf079bceca32bc9604ab # v2.62.43
+        with:
+          tool: cargo-semver-checks
+
+      - name: Check semver with default features
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-authenticator --package passkey-client
+          --package passkey-transports --package passkey-types
+          --default-features
 
       - name: Check semver with `linux` feature
-        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
-        with:
-          package: passkey,passkey-authenticator,passkey-client,passkey-transports
-          feature-group: default-features
-          features: linux
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-authenticator --package passkey-client
+          --package passkey-transports
+          --default-features --features linux
 
       - name: Check semver with `windows` feature
-        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
-        with:
-          package: passkey,passkey-client
-          feature-group: default-features
-          features: windows
-          rust-target: x86_64-pc-windows-gnu
+        run: >-
+          rustup run "$RUST_VERSION" cargo semver-checks check-release
+          --package passkey --package passkey-client
+          --default-features --features windows
+          --target x86_64-pc-windows-gnu
 
   docs:
     name: Documentation
@@ -153,11 +160,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,20 +172,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mingw-w64 nasm
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
-          target: x86_64-pc-windows-gnu
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-gnu
 
       - name: Run rustdoc
-        run: RUSTDOCFLAGS="-D warnings " rustup run ${{ env.rust }} cargo doc --workspace --no-deps --features ${{ matrix.backend }}
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --features ${{ matrix.backend }}
 
       - name: Run rustdoc with `linux` feature
-        run: RUSTDOCFLAGS="-D warnings " rustup run ${{ env.rust }} cargo doc --workspace --no-deps --features linux,${{ matrix.backend }}
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --features linux,${{ matrix.backend }}
 
       - name: Run rustdoc with `windows` feature
-        run: RUSTDOCFLAGS="-D warnings " rustup run ${{ env.rust }} cargo doc --workspace --no-deps --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }}
+        run: RUSTDOCFLAGS="-D warnings " rustup run "$RUST_VERSION" cargo doc --workspace --no-deps --target x86_64-pc-windows-gnu --features windows,${{ matrix.backend }}
 
   build-wasm:
     name: Build-WASM
@@ -194,11 +195,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -211,14 +207,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang emscripten
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
-          target: wasm32-unknown-emscripten
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-emscripten
 
       - name: Run build
-        run: rustup run ${{ env.rust }} cargo build --features "passkey-crypto/js,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}" --target wasm32-unknown-emscripten
+        run: rustup run "$RUST_VERSION" cargo build --features "passkey-crypto/js,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}" --target wasm32-unknown-emscripten
 
   test-linux:
     name: Test-Linux
@@ -229,27 +224,21 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install libudev
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
 
       - name: Run tests with `linux` feature
-        run: rustup run ${{ env.rust }} cargo test --features "linux,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
+        run: rustup run "$RUST_VERSION" cargo test --features "linux,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
 
   test-crypto-backend-compatibility:
     name: Test-Crypto-Backend-Compatibility
@@ -257,24 +246,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Run cross-backend compatibility tests
-        run: rustup run ${{ env.rust }} cargo test -p passkey-crypto --features rust-crypto,aws-lc-rs
+        run: rustup run "$RUST_VERSION" cargo test -p passkey-crypto --features rust-crypto,aws-lc-rs
 
   test-windows:
     name: Test-Windows
@@ -288,24 +271,18 @@ jobs:
           - windows-11-arm
           - windows-2025
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Run tests
-        run: rustup run ${{ env.rust }} cargo test --features "windows,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
+        run: rustup run "$RUST_VERSION" cargo test --features "windows,passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
 
   test-macos:
     name: Test-MacOS
@@ -316,27 +293,21 @@ jobs:
       matrix:
         backend: [rust-crypto, aws-lc-rs]
         runs-on:
-          - macos-26-intel
+          - macos-15-intel
           - macos-26
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: step-security/actions-rs-toolchain@40a2f87e50bed6faa2d050e99810b226b75d8c8a # v1.0.7
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          profile: minimal
-          toolchain: ${{ env.rust }}
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Run tests
-        run: rustup run ${{ env.rust }} cargo test --features "passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
+        run: rustup run "$RUST_VERSION" cargo test --features "passkey-client/tokio,passkey-authenticator/tokio,${{ matrix.backend }}"
 
   typeshare:
     name: Typeshare
@@ -357,22 +328,21 @@ jobs:
           - fs: swift
             lang: swift
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
-        with:
-          egress-policy: audit
-
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Install typeshare CLI
-        uses: baptiste0928/cargo-install@8195d4f734a149db85385bb4102b42efcd373759 # v3.5.0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
-          crate: typeshare-cli
-          version: "1.13.4"
-          locked: true
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install typeshare CLI
+        uses: clechasseur/rs-cargo@bbcc0f43bb19de578aed0eaf1211970155d0fbcd # v4.0.0
+        with:
+          command: install
+          args: --version 1.13.4 --locked typeshare-cli
 
       - name: Run typeshare CLI
         run: typeshare --lang=${{ matrix.lang }} . -o test.${{ matrix.fs }}
