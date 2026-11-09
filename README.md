@@ -1,11 +1,13 @@
 # Fork differences
 
 As of the merge of 1Password/passkey-rs `1606717`, this fork matches upstream features.
-The CI workflow differs slightly for Bitwarden org rules.
+The CI workflow differs slightly for Bitwarden org rules, and the fork carries a fix for a
+tokio deprecation that breaks clippy.
 
 |  commit  | Upstream PR | description |
 |  ------  | ----------- | ----------- |
 | 95078ffd | none        | CI lints    |
+| b372ce15 | none        | Replace deprecated `AsyncFd::with_interest` |
 # Passkey-rs by 1Password
 
 [![github]](https://github.com/1Password/passkey-rs/tree/main/passkey/)
