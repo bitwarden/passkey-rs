@@ -1,9 +1,13 @@
 # Fork differences
 
+As of the merge of 1Password/passkey-rs `1606717`, this fork matches upstream features.
+The CI workflow differs slightly for Bitwarden org rules, and the fork carries a fix for a
+tokio deprecation that breaks clippy.
+
 |  commit  | Upstream PR | description |
 |  ------  | ----------- | ----------- |
-| 02accbf1 | none                                                                                  | Pin Rust, Actions and OS runner versions in CI. |
-
+| 95078ffd | none        | CI lints    |
+| b372ce15 | none        | Replace deprecated `AsyncFd::with_interest` |
 # Passkey-rs by 1Password
 
 [![github]](https://github.com/1Password/passkey-rs/tree/main/passkey/)
@@ -194,7 +198,6 @@ However, depending on the context, it may be necessary for some applications to 
 
 ## Current Limitations
 
-- `Client::authenticate()` and `Client::register()` do not respect timeout values set in `CredentialRequestOptions`.
 - The `Client` always reports its [Authenticator Attachment Modality](https://www.w3.org/TR/webauthn-3/#sctn-authenticator-attachment-modality) as "Platform"
 - `Client` only supports the "internal" type of [AuthenticatorTransport](https://www.w3.org/TR/webauthn-3/#enum-transport)
 - The `Authenticator` currently only supports the ECDSA w/SHA-256 algorithm.

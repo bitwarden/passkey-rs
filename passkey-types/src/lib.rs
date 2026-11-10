@@ -34,7 +34,6 @@ mod utils;
 mod passkey;
 
 pub mod ctap2;
-pub mod u2f;
 pub mod webauthn;
 
 // Re-exports
@@ -42,7 +41,7 @@ pub use self::{
     passkey::{CredentialExtensions, Passkey, StoredHmacSecret},
     utils::{
         bytes::{Bytes, NotBase64Encoded},
-        crypto, encoding, rand,
+        encoding,
     },
 };
 

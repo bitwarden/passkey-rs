@@ -1,6 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, ops::ControlFlow};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, hash_map::Entry},
+    ops::ControlFlow,
+};
 
-use itertools::Itertools;
 use passkey_types::webauthn::WellKnown;
 use url::Url;
 
@@ -78,7 +81,7 @@ where
         let mut effective_domain = origin.domain().ok_or(WebauthnError::OriginMissingDomain)?;
 
         if let Some(rp_id) = rp_id {
-            if !effective_domain.ends_with(rp_id) {
+            if !is_registrable_suffix_of_or_equal_to(effective_domain, rp_id) {
                 effective_domain = self
                     .validate_related_origins(rp_id, effective_domain)
                     .await?;
@@ -152,7 +155,7 @@ where
 
         if let Some(rp_id) = rp_id {
             // subset from assert_web_rp_id
-            if !effective_rp_id.ends_with(rp_id) {
+            if !is_registrable_suffix_of_or_equal_to(effective_rp_id, rp_id) {
                 return Err(WebauthnError::OriginRpMissmatch);
             }
             effective_rp_id = rp_id;
@@ -180,13 +183,16 @@ where
         rp_id: &'a str,
         effective_domain: &'a str,
     ) -> Result<&'a str, WebauthnError> {
-        let Some(ref fetcher) = self.fetcher else {
-            return Err(WebauthnError::OriginRpMissmatch);
-        };
-
+        // First check whether we even have a valid RP ID before attempting
+        // to see if we have the means to fetch .well-known. This ordering is
+        // important for the error variants we expect to see.
         if let ControlFlow::Break(res) = self.assert_valid_rp_id(rp_id) {
             return res;
         }
+
+        let Some(ref fetcher) = self.fetcher else {
+            return Err(WebauthnError::OriginRpMissmatch);
+        };
 
         let well_known_url = Url::parse(&format!("https://{rp_id}/.well-known/webauthn"))
             .expect("Building well_known_url unexpectedly failed");
@@ -196,7 +202,7 @@ where
 
         if final_url
             .domain()
-            .filter(|domain| domain.ends_with(rp_id))
+            .filter(|domain| is_registrable_suffix_of_or_equal_to(domain, rp_id))
             .is_none()
         {
             return Err(WebauthnError::RedirectError);
@@ -209,22 +215,28 @@ where
             .filter_map(|origin| decode_host(origin.domain()?))
             .collect();
 
-        let labels_to_origins: HashMap<_, _> = origin_domains
-            .iter()
-            .filter_map(|origin| {
-                let etld = self.tld_provider.effective_tld_plus_one(origin).ok()?;
-                let (label, _) = etld.split_once('.')?;
-                if label.is_empty() {
-                    None
-                } else {
-                    Some((label, origin))
+        let mut labels_to_origins = HashMap::<&str, Vec<&Cow<'_, str>>>::new();
+        for origin in origin_domains.iter() {
+            let Some((label, _)) = self
+                .tld_provider
+                .effective_tld_plus_one(origin.as_ref())
+                .ok()
+                .and_then(|etld| etld.split_once('.'))
+            else {
+                continue;
+            };
+            if label.is_empty() {
+                continue;
+            }
+            let len = labels_to_origins.len();
+            match labels_to_origins.entry(label) {
+                Entry::Occupied(e) => e.into_mut().push(origin),
+                // Only take up to the configured number of labels.
+                Entry::Vacant(e) if len < Self::ORIGIN_LABEL_LIMIT => {
+                    e.insert(vec![origin]);
                 }
-            })
-            .into_group_map();
-
-        // upper limit of registerable domain labels
-        if labels_to_origins.len() > Self::ORIGIN_LABEL_LIMIT {
-            return Err(WebauthnError::ExceedsMaxLabelLimit);
+                Entry::Vacant(_) => {}
+            }
         }
 
         let decoded_effective_domain =
@@ -249,6 +261,18 @@ where
 
         Ok(rp_id)
     }
+}
+
+/// Checks whether `host` is a registrable domain suffix of or is equal to `rp_id`,
+/// per <https://html.spec.whatwg.org/multipage/browsers.html#is-a-registrable-domain-suffix-of-or-is-equal-to>.
+///
+/// This requires that `host` either equals `rp_id` exactly, or ends with `".{rp_id}"`,
+/// preventing `evil-example.com` from matching `example.com`.
+fn is_registrable_suffix_of_or_equal_to(host: &str, rp_id: &str) -> bool {
+    host == rp_id
+        || host
+            .strip_suffix(rp_id)
+            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Returns a decoded [String] if the domain name is punycode otherwise

@@ -1,4 +1,4 @@
-use coset::iana;
+use passkey_crypto::{CryptoBackend, iana, rng::RngBackend};
 use passkey_types::{
     ctap2::{Aaguid, Ctap2Error, Flags},
     webauthn,
@@ -38,8 +38,8 @@ impl CredentialIdLength {
     const MAX: u8 = 64;
 
     /// Generates and returns a uniformly random [CredentialIdLength].
-    pub fn randomized(rng: &mut impl rand::Rng) -> Self {
-        let length = rng.gen_range(Self::MIN..=Self::MAX);
+    pub fn randomized<Rng: RngBackend>() -> Self {
+        let length = Rng::from_range(Self::MIN..=Self::MAX);
         Self(length)
     }
 }
@@ -66,8 +66,33 @@ impl From<CredentialIdLength> for usize {
     }
 }
 
+trait ValidationOptions {
+    fn uv(&self) -> bool;
+    fn up(&self) -> bool;
+}
+
+impl ValidationOptions for passkey_types::ctap2::make_credential::Options {
+    fn uv(&self) -> bool {
+        self.uv
+    }
+
+    fn up(&self) -> bool {
+        self.up
+    }
+}
+
+impl ValidationOptions for passkey_types::ctap2::get_assertion::Options {
+    fn uv(&self) -> bool {
+        self.uv
+    }
+
+    fn up(&self) -> bool {
+        self.up
+    }
+}
+
 /// A virtual authenticator with all the necessary state and information.
-pub struct Authenticator<S, U> {
+pub struct Authenticator<S, U, C> {
     /// The authenticator's AAGUID
     aaguid: Aaguid,
     /// Provides credential storage capabilities
@@ -94,20 +119,23 @@ pub struct Authenticator<S, U> {
 
     /// Supported authenticator extensions
     extensions: Extensions,
+
+    /// The cryptographic backend of the Authenticator
+    crypto: C,
 }
 
-impl<S, U> Authenticator<S, U>
+impl<S, U, C> Authenticator<S, U, C>
 where
     S: CredentialStore,
     U: UserValidationMethod,
+    C: CryptoBackend,
 {
     /// Create an authenticator with a known aaguid, a backing storage and a User verification system.
-    pub fn new(aaguid: Aaguid, store: S, user: U) -> Self {
+    pub fn new(aaguid: Aaguid, store: S, user: U, crypto: C) -> Self {
         Self {
             aaguid,
             store,
-            // TODO: Change this to a method on the cryptographic backend
-            algs: vec![iana::Algorithm::ES256],
+            algs: crypto.enumerate_algorithms(),
             transports: vec![
                 webauthn::AuthenticatorTransport::Internal,
                 webauthn::AuthenticatorTransport::Hybrid,
@@ -116,6 +144,7 @@ where
             make_credentials_with_signature_counter: false,
             credential_id_length: CredentialIdLength::default(),
             extensions: Extensions::default(),
+            crypto,
         }
     }
 
@@ -140,6 +169,25 @@ where
     /// Get the current length of credential that will be generated when making a new credential.
     pub fn make_credential_id_length(&self) -> CredentialIdLength {
         self.credential_id_length
+    }
+
+    /// Override the crypto backend's algorithm enumeration into a subset of what it supports.
+    ///
+    /// If the provided list does not intersect with the crypto backend's supported algorithms,
+    /// this method will return an error.
+    pub fn set_algorithms(&mut self, algs: &[iana::Algorithm]) -> Result<(), Ctap2Error> {
+        // iana::Algorithm doesn't implement hash, so we gotta loop
+        let backend_supported = self.crypto.enumerate_algorithms();
+        let retained: Vec<_> = algs
+            .iter()
+            .filter(|alg| backend_supported.contains(*alg))
+            .cloned()
+            .collect();
+        if retained.is_empty() {
+            return Err(Ctap2Error::UnsupportedAlgorithm);
+        }
+        self.algs = retained;
+        Ok(())
     }
 
     /// Access the [`CredentialStore`] to look into what is stored.
@@ -202,22 +250,22 @@ where
     async fn check_user(
         &self,
         hint: UiHint<'_, <U as UserValidationMethod>::PasskeyItem>,
-        options: &passkey_types::ctap2::make_credential::Options,
+        options: &impl ValidationOptions,
     ) -> Result<Flags, Ctap2Error> {
-        if options.uv && self.user_validation.is_verification_enabled() != Some(true) {
+        if options.uv() && self.user_validation.is_verification_enabled() != Some(true) {
             return Err(Ctap2Error::UnsupportedOption);
         };
 
         let check_result = self
             .user_validation
-            .check_user(hint, options.up, options.uv)
+            .check_user(hint, options.up(), options.uv())
             .await?;
 
-        if options.up && !check_result.presence {
+        if options.up() && !check_result.presence {
             return Err(Ctap2Error::OperationDenied);
         }
 
-        if options.uv && !check_result.verification {
+        if options.uv() && !check_result.verification {
             return Err(Ctap2Error::OperationDenied);
         }
 
